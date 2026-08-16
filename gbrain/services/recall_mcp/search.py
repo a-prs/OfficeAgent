@@ -56,7 +56,7 @@ def _load_auth_knobs() -> tuple[int, bool]:
     elif tol > 86400:
         tol = 86400
 
-    raw_kill = _os.environ.get("GBRAIN_HMAC_AUTH_ENABLED", "1").strip().lower()
+    raw_kill = _os.environ.get("OFFICEAGENT_HMAC_AUTH_ENABLED", "1").strip().lower()
     hmac_enabled = raw_kill not in {"0", "false", "no", "off"}
     return tol, hmac_enabled
 
@@ -67,7 +67,7 @@ async def _resolve_reader(pool: Any) -> AgentContext:
     Reads the captured ContextVar set by the ASGI middleware and
     dispatches Bearer or Hermes HMAC via the shared
     :func:`resolve_request_identity` helper, applying the operator
-    kill-switch (``GBRAIN_HMAC_AUTH_ENABLED=0``). Raises
+    kill-switch (``OFFICEAGENT_HMAC_AUTH_ENABLED=0``). Raises
     :class:`PermissionError` if no valid auth is present.
     """
     tol, hmac_enabled = _load_auth_knobs()

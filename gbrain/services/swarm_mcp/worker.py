@@ -17,7 +17,7 @@ Per-agent outbound auth (extension 2026-05-17, Hermes integration):
   behavior: use ``GATEWAY_WEBHOOK_TOKEN`` as a Bearer token if set, otherwise
   send no auth header. Bearer is therefore the default for backward
   compatibility.
-- ``GBRAIN_HMAC_OUTBOUND_ENABLED=0`` disables HMAC signing globally; targets
+- ``OFFICEAGENT_HMAC_OUTBOUND_ENABLED=0`` disables HMAC signing globally; targets
   configured as HMAC are then returned as ``retry`` so they re-deliver after
   the operator re-enables outbound HMAC.
 """
@@ -158,10 +158,10 @@ def _serialize_gateway_body(body: dict) -> bytes:
 def _hmac_outbound_enabled() -> bool:
     """Whether outbound HMAC signing is globally enabled.
 
-    Default: enabled. Set ``GBRAIN_HMAC_OUTBOUND_ENABLED=0`` for emergency
+    Default: enabled. Set ``OFFICEAGENT_HMAC_OUTBOUND_ENABLED=0`` for emergency
     rollback — HMAC targets then defer to retry until re-enabled.
     """
-    return os.environ.get("GBRAIN_HMAC_OUTBOUND_ENABLED", "1") != "0"
+    return os.environ.get("OFFICEAGENT_HMAC_OUTBOUND_ENABLED", "1") != "0"
 
 
 def _format_virtual_prompt(from_agent: str, to_agent: str, task_id: str, payload: dict) -> str:

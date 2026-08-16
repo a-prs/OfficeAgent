@@ -9,8 +9,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Forbidden terms (regex, case-insensitive). Add new ones at the end with a comment.
-FORBIDDEN='(agent-a|agent-b|agent-c|agent-e|agent-d|agent-f|host|office2-gbrain|office2brain|host_brain|mra-prs|@office2eshiev|@fridayhumanbot|@agent-eproducerbot|@agent-dsalebot|@Illidandevopsbot|65\.109\.137\.239|100\.65\.239\.12|100\.104\.191\.127|213\.171\.6\.132|mcp\.host\.xyz|task\.host\.xyz|example\.su|/opt/office2-gbrain|/home/openclaw|MCP_FALLBACK_TOKEN|FALLBACK_AGENT)'
+# Forbidden terms (regex, case-insensitive). Add new ones at the end with a
+# comment. EMPTY BY DEFAULT in the public OfficeAgent distro on purpose:
+# the upstream internal fork this was ported from used this list to catch
+# its own team's codenames/bot-handles/IPs/hostnames leaking into commits.
+# Shipping THAT list here would itself be exactly the kind of leak this
+# script exists to prevent, so it was stripped during the transplant
+# rather than carried forward. If you run your own OfficeAgent fork with
+# multiple contributors, add YOUR team's private identifiers here (agent
+# codenames, internal hostnames, bot @handles, server IPs) following the
+# same `(term1|term2|...)` alternation shape.
+FORBIDDEN='OFFICEAGENT_NO_FORBIDDEN_TERMS_CONFIGURED_YET'
 
 # Excluded paths (we don't scan these)
 EXCLUDES=(

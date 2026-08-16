@@ -10,7 +10,7 @@ three MCP services (memory, recall, swarm):
 
 Service modules MUST call ``resolve_request_identity`` and pass the
 ``hmac_auth_enabled`` config flag so the operator kill-switch
-(``GBRAIN_HMAC_AUTH_ENABLED=0``) is enforced consistently.
+(``OFFICEAGENT_HMAC_AUTH_ENABLED=0``) is enforced consistently.
 
 Low-level helpers (:func:`authenticate`, :func:`authenticate_hmac`,
 :func:`authenticate_captured`) are kept public for unit tests, but
@@ -212,7 +212,7 @@ _DUMMY_SECRET = b"\x00" * 32
 
 
 def _load_hmac_secrets_from_env() -> dict[str, bytes]:
-    """Load raw HMAC secrets from ``GBRAIN_HMAC_SECRETS_JSON``.
+    """Load raw HMAC secrets from ``OFFICEAGENT_HMAC_SECRETS_JSON``.
 
     The env var holds a JSON object mapping ``agent_name -> raw_secret``.
     Empty/unset env returns an empty mapping. Malformed JSON or
@@ -222,16 +222,16 @@ def _load_hmac_secrets_from_env() -> dict[str, bytes]:
     Returns:
         Mapping from agent name to raw secret bytes (utf-8 encoded).
     """
-    raw = os.environ.get("GBRAIN_HMAC_SECRETS_JSON", "").strip()
+    raw = os.environ.get("OFFICEAGENT_HMAC_SECRETS_JSON", "").strip()
     if not raw:
         return {}
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("GBRAIN_HMAC_SECRETS_JSON is not valid JSON; treating as empty")
+        logger.warning("OFFICEAGENT_HMAC_SECRETS_JSON is not valid JSON; treating as empty")
         return {}
     if not isinstance(data, dict):
-        logger.warning("GBRAIN_HMAC_SECRETS_JSON must be a JSON object; treating as empty")
+        logger.warning("OFFICEAGENT_HMAC_SECRETS_JSON must be a JSON object; treating as empty")
         return {}
     out: dict[str, bytes] = {}
     for agent, secret in data.items():
@@ -439,7 +439,7 @@ async def authenticate_captured(
         if not hmac_auth_enabled:
             logger.warning(
                 "HMAC authentication attempted with kill-switch disabled "
-                "(GBRAIN_HMAC_AUTH_ENABLED=0)"
+                "(OFFICEAGENT_HMAC_AUTH_ENABLED=0)"
             )
             raise PermissionError("HMAC auth disabled")
         return await authenticate_hmac(

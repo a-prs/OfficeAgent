@@ -1,6 +1,6 @@
 """Shared tool gating policy for memory, recall, and swarm MCP servers.
 
-Reads a single environment variable, ``GBRAIN_TOOLS``, with two valid values:
+Reads a single environment variable, ``OFFICEAGENT_TOOLS``, with two valid values:
 
 - ``core`` (default): expose only the operational subset of tools.
 - ``all``: expose the full tool surface, including admin/diagnostic and slot tools.
@@ -63,7 +63,7 @@ ALWAYS_ON_TOOLS_BY_SERVER: dict[str, frozenset[str]] = {
 
 
 def parse_tool_set(raw: str | None) -> str:
-    """Normalize a ``GBRAIN_TOOLS`` env value to a known tool set.
+    """Normalize a ``OFFICEAGENT_TOOLS`` env value to a known tool set.
 
     Args:
         raw: Raw env string or ``None``.
@@ -79,7 +79,7 @@ def parse_tool_set(raw: str | None) -> str:
     if raw in VALID_TOOL_SETS:
         return raw
     raise RuntimeError(
-        "GBRAIN_TOOLS must be one of: core, all"
+        "OFFICEAGENT_TOOLS must be one of: core, all"
     )
 
 

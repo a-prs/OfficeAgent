@@ -402,10 +402,10 @@ def test_worker_mixed_bearer_and_hmac_in_batch(monkeypatch: pytest.MonkeyPatch) 
 
     asyncio.run(_go())
     assert len(client.calls) == 2
-    agent-g_headers = client.calls[0]["headers"]
+    agent_g_headers = client.calls[0]["headers"]
     claude_headers = client.calls[1]["headers"]
-    assert SIGNATURE_HEADER in agent-g_headers
-    assert "Authorization" not in agent-g_headers
+    assert SIGNATURE_HEADER in agent_g_headers
+    assert "Authorization" not in agent_g_headers
     assert claude_headers["Authorization"] == "Bearer claude-bearer"
     assert SIGNATURE_HEADER not in claude_headers
 

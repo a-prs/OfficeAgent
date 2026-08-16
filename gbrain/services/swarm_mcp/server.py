@@ -68,14 +68,14 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
 mcp = FastMCP("swarm-mcp", lifespan=lifespan)
 
-# Tool gating: parse GBRAIN_TOOLS once at import time. `core` exposes only
+# Tool gating: parse OFFICEAGENT_TOOLS once at import time. `core` exposes only
 # always-on tools (notify, ack). `all` exposes the full swarm surface.
-_TOOL_SET = parse_tool_set(os.environ.get("GBRAIN_TOOLS"))
+_TOOL_SET = parse_tool_set(os.environ.get("OFFICEAGENT_TOOLS"))
 
 
 # In skip-mode the function still lives in the closure but is NOT recorded on `mcp` — clients cannot invoke it.
 def _gated_tool(tool_name: str, **kwargs):
-    """Decorator that registers a tool only when permitted by GBRAIN_TOOLS.
+    """Decorator that registers a tool only when permitted by OFFICEAGENT_TOOLS.
 
     Returns either `mcp.tool(...)` or an identity decorator so the underlying
     coroutine remains importable and callable from Python regardless of mode.
@@ -99,7 +99,7 @@ async def _resolve_caller(ctx: Any, pool: asyncpg.Pool) -> str:
 
     Delegates to :func:`services.shared.auth.resolve_request_identity`
     which applies the operator HMAC kill-switch
-    (``GBRAIN_HMAC_AUTH_ENABLED=0``). No silent fallback to an
+    (``OFFICEAGENT_HMAC_AUTH_ENABLED=0``). No silent fallback to an
     env-default identity.
 
     ``ctx`` is accepted for backward-compat but no longer consulted

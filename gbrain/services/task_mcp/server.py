@@ -69,12 +69,12 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
 
 mcp = FastMCP("task-mcp", lifespan=lifespan)
 
-# Tool gating: parse GBRAIN_TOOLS once at import time.
-_TOOL_SET = parse_tool_set(os.environ.get("GBRAIN_TOOLS"))
+# Tool gating: parse OFFICEAGENT_TOOLS once at import time.
+_TOOL_SET = parse_tool_set(os.environ.get("OFFICEAGENT_TOOLS"))
 
 
 def _gated_tool(tool_name: str, **kwargs):
-    """Decorator that registers a tool only when permitted by GBRAIN_TOOLS.
+    """Decorator that registers a tool only when permitted by OFFICEAGENT_TOOLS.
 
     Returns either `mcp.tool(...)` or an identity decorator so the underlying
     coroutine remains importable and callable from Python regardless of mode.

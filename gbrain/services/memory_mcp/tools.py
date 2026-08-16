@@ -1,4 +1,4 @@
-"""MCP tools for memory-mcp write service (9 doc tools + 6 slot tools, gated by GBRAIN_TOOLS)."""
+"""MCP tools for memory-mcp write service (9 doc tools + 6 slot tools, gated by OFFICEAGENT_TOOLS)."""
 import hashlib
 import json
 import logging
@@ -330,7 +330,7 @@ async def _queue_embedding(pool: asyncpg.Pool, doc_id: int) -> None:
 def _load_runtime_config() -> Config:
     """Build a lightweight Config snapshot for per-request auth.
 
-    Reads ``HMAC_TIMESTAMP_TOLERANCE_SECONDS`` and ``GBRAIN_HMAC_AUTH_ENABLED``
+    Reads ``HMAC_TIMESTAMP_TOLERANCE_SECONDS`` and ``OFFICEAGENT_HMAC_AUTH_ENABLED``
     from env. Other Config fields require PG_PASSWORD/MCP_PORT at the
     process level and are irrelevant to per-request auth, so we
     constructor-set them with safe placeholders to avoid spurious
@@ -352,7 +352,7 @@ def _load_runtime_config() -> Config:
     elif tol > 86400:
         tol = 86400
 
-    raw_kill = os.environ.get("GBRAIN_HMAC_AUTH_ENABLED", "1").strip().lower()
+    raw_kill = os.environ.get("OFFICEAGENT_HMAC_AUTH_ENABLED", "1").strip().lower()
     if raw_kill in {"0", "false", "no", "off"}:
         hmac_enabled = False
     else:
@@ -375,7 +375,7 @@ async def _authenticate_request(ctx, pool: asyncpg.Pool) -> AgentContext:
 
     * Reads the memory-mcp ContextVar populated by the ASGI middleware.
     * Applies the operator HMAC kill-switch
-      (``GBRAIN_HMAC_AUTH_ENABLED=0`` → HMAC rejected, Bearer keeps
+      (``OFFICEAGENT_HMAC_AUTH_ENABLED=0`` → HMAC rejected, Bearer keeps
       working).
     * Bridges existing tests that monkeypatch
       ``services.memory_mcp.tools.authenticate`` (Bearer path) so the
@@ -462,15 +462,15 @@ def register_tools(
         Immutable by default -- use ``supersede_decision`` for business-level
         chains. Jaccard auto-supersession runs before the insert: when the
         new decision's token set overlaps an existing same-scope decision
-        with Jaccard >= ``GBRAIN_SUPERSEDE_AUTO`` (default 0.85), the old
+        with Jaccard >= ``OFFICEAGENT_SUPERSEDE_AUTO`` (default 0.85), the old
         decision's frontmatter is flipped to ``is_latest: false`` +
         ``superseded_by: <new_path>`` inside a single transaction with the
-        new insert. When ``GBRAIN_SUPERSEDE_HINT`` (default 0.70) <=
+        new insert. When ``OFFICEAGENT_SUPERSEDE_HINT`` (default 0.70) <=
         Jaccard < auto threshold, the new doc is inserted unchanged and the
         return value is a JSON string carrying ``suggested_supersedes``
         for operator review.
 
-        Set ``GBRAIN_SUPERSEDE_AUTO=0`` to disable the auto branch entirely
+        Set ``OFFICEAGENT_SUPERSEDE_AUTO=0`` to disable the auto branch entirely
         (hints still surface in the 0.70-0.85 band).
         """
         t0 = time.monotonic()
@@ -492,15 +492,15 @@ def register_tools(
         abs_path = validate_path(rel_path, vault_root)
 
         # Read thresholds dynamically per-call so tests + operators can flip
-        # GBRAIN_SUPERSEDE_AUTO/HINT without restarting the service. Falls
+        # OFFICEAGENT_SUPERSEDE_AUTO/HINT without restarting the service. Falls
         # back to PLAN defaults when env is unset.
-        auto_threshold = _supersede_threshold_env("GBRAIN_SUPERSEDE_AUTO", 0.85)
-        hint_threshold = _supersede_threshold_env("GBRAIN_SUPERSEDE_HINT", 0.70)
+        auto_threshold = _supersede_threshold_env("OFFICEAGENT_SUPERSEDE_AUTO", 0.85)
+        hint_threshold = _supersede_threshold_env("OFFICEAGENT_SUPERSEDE_HINT", 0.70)
         if hint_threshold > auto_threshold and auto_threshold > 0:
             # Misconfigured: degrade to hint-only mode to avoid surprise
             # auto-mutations. Treat as auto disabled.
             logger.warning(
-                "GBRAIN_SUPERSEDE_HINT (%s) > GBRAIN_SUPERSEDE_AUTO (%s); "
+                "OFFICEAGENT_SUPERSEDE_HINT (%s) > OFFICEAGENT_SUPERSEDE_AUTO (%s); "
                 "degrading to hint-only mode (auto disabled)",
                 hint_threshold, auto_threshold,
             )

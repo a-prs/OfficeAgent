@@ -199,27 +199,27 @@ class Config:
         default_factory=lambda: int(os.environ["MCP_PORT"])
     )
     gbrain_tools: str = field(
-        default_factory=lambda: parse_tool_set(os.environ.get("GBRAIN_TOOLS"))
+        default_factory=lambda: parse_tool_set(os.environ.get("OFFICEAGENT_TOOLS"))
     )
     rrf_weight_bm25: float = field(
-        default_factory=lambda: _env_float("GBRAIN_RRF_WEIGHT_BM25", "0.4")
+        default_factory=lambda: _env_float("OFFICEAGENT_RRF_WEIGHT_BM25", "0.4")
     )
     rrf_weight_vec: float = field(
-        default_factory=lambda: _env_float("GBRAIN_RRF_WEIGHT_VEC", "0.6")
+        default_factory=lambda: _env_float("OFFICEAGENT_RRF_WEIGHT_VEC", "0.6")
     )
     diversify_max: int = field(
         default_factory=lambda: _env_int(
-            "GBRAIN_DIVERSIFY_MAX", "0", min_value=0, max_value=100
+            "OFFICEAGENT_DIVERSIFY_MAX", "0", min_value=0, max_value=100
         )
     )
     supersede_auto_threshold: float = field(
         default_factory=lambda: _env_float(
-            "GBRAIN_SUPERSEDE_AUTO", "0.85", min_value=0.0
+            "OFFICEAGENT_SUPERSEDE_AUTO", "0.85", min_value=0.0
         )
     )
     supersede_hint_threshold: float = field(
         default_factory=lambda: _env_float(
-            "GBRAIN_SUPERSEDE_HINT", "0.70", min_value=0.0
+            "OFFICEAGENT_SUPERSEDE_HINT", "0.70", min_value=0.0
         )
     )
     hmac_timestamp_tolerance_seconds: int = field(
@@ -231,7 +231,7 @@ class Config:
         )
     )
     hmac_auth_enabled: bool = field(
-        default_factory=lambda: _env_bool("GBRAIN_HMAC_AUTH_ENABLED", "1")
+        default_factory=lambda: _env_bool("OFFICEAGENT_HMAC_AUTH_ENABLED", "1")
     )
 
     def __post_init__(self) -> None:
@@ -241,7 +241,7 @@ class Config:
         the hint band ``[hint, auto)`` is non-empty and the auto band
         ``[auto, 1.0]`` does not overlap into hint territory.
 
-        ``GBRAIN_SUPERSEDE_AUTO=0.0`` is the documented disable sentinel
+        ``OFFICEAGENT_SUPERSEDE_AUTO=0.0`` is the documented disable sentinel
         (.env.example: "Set to 0 to disable auto-supersession entirely").
         In that mode the hint > auto cross-validation is intentionally
         skipped because there is no auto band to overlap into -- the hint
@@ -254,18 +254,18 @@ class Config:
         if self.supersede_auto_threshold != 0.0:
             if self.supersede_hint_threshold > self.supersede_auto_threshold:
                 raise RuntimeError(
-                    "GBRAIN_SUPERSEDE_HINT "
+                    "OFFICEAGENT_SUPERSEDE_HINT "
                     f"({self.supersede_hint_threshold}) must be <= "
-                    f"GBRAIN_SUPERSEDE_AUTO ({self.supersede_auto_threshold})"
+                    f"OFFICEAGENT_SUPERSEDE_AUTO ({self.supersede_auto_threshold})"
                 )
             if self.supersede_auto_threshold > 1.0:
                 raise RuntimeError(
-                    f"GBRAIN_SUPERSEDE_AUTO ({self.supersede_auto_threshold}) "
+                    f"OFFICEAGENT_SUPERSEDE_AUTO ({self.supersede_auto_threshold}) "
                     "must be <= 1.0 (Jaccard cannot exceed 1.0)"
                 )
         if self.supersede_hint_threshold > 1.0:
             raise RuntimeError(
-                f"GBRAIN_SUPERSEDE_HINT ({self.supersede_hint_threshold}) "
+                f"OFFICEAGENT_SUPERSEDE_HINT ({self.supersede_hint_threshold}) "
                 "must be <= 1.0 (Jaccard cannot exceed 1.0)"
             )
 
