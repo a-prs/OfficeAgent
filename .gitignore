@@ -1,0 +1,35 @@
+# секреты — никогда
+.env
+*.env
+!.env.example
+*.token
+**/secrets/
+**/credentials.json
+**/.credentials*
+**/*.pem
+**/*.key
+
+# рантайм-данные инстанса
+data/
+vault/
+!templates/vault-template/
+state/
+!bot/src/state/
+workspaces/
+claudehome/
+*.log
+logs/
+
+# зависимости и сборка
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+out/
+.bun/
+
+# мусор macOS/резервные копии
+.DS_Store
+._*
+*.bak
