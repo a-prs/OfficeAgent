@@ -530,6 +530,24 @@ trap cleanup EXIT INT TERM
 # inheritance through `exec` already handles those. Absent (Claude
 # direction, or a caller that didn't set it) -> no --model flag, unchanged
 # behaviour from before this fix.
+# DEFAULT_MODEL_TARGET=alt (2026-08-16): deployments that run entirely on
+# the owner's alternate Anthropic-compatible provider (e.g. GLM/Z.ai) with
+# no Anthropic credential configured at all set this instead of relying on
+# a live /model switch. Applied on EVERY cold boot this script handles —
+# first spawn AND every idle-kill respawn — unlike a model-switch.ts /model
+# toggle, which only rewrites an already-running pane and would otherwise
+# get silently reset back to the primary provider on the next respawn
+# (topic sessions have no persisted-model-survives-idle-kill guarantee by
+# design, see model-state.ts resetModelStateOnKill). MULTICHAT_MODEL_OVERRIDE
+# and an explicitly pre-set ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN both take
+# precedence if already set by a caller (e.g. a live model-switch respawn).
+if [[ "${DEFAULT_MODEL_TARGET:-}" == "alt" ]]; then
+  : "${MULTICHAT_MODEL_OVERRIDE:=${ALT_PROVIDER_MODEL:-}}"
+  : "${ANTHROPIC_BASE_URL:=${ALT_PROVIDER_BASE_URL:-}}"
+  : "${ANTHROPIC_AUTH_TOKEN:=${ALT_PROVIDER_TOKEN:-}}"
+  export MULTICHAT_MODEL_OVERRIDE ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+fi
+
 model_args=()
 if [[ -n "${MULTICHAT_MODEL_OVERRIDE:-}" ]]; then
   model_args=(--model "$MULTICHAT_MODEL_OVERRIDE")

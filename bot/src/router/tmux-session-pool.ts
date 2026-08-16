@@ -197,7 +197,25 @@ export function buildSanitizedTmuxEnv(parentEnv: NodeJS.ProcessEnv): {
   // they must inherit this token from the parent to authenticate. Safe to
   // forward: topic sessions are our own agents, not untrusted user-facing
   // processes; the token never leaves the host.
-  for (const key of ['TELEGRAM_WEBHOOK_TOKEN', 'TELEGRAM_WEBHOOK_URL', 'TELEGRAM_WEBHOOK_PORT', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+  //
+  // ALT_PROVIDER_*/DEFAULT_MODEL_TARGET: the owner's alternate Anthropic-
+  // compatible provider (e.g. GLM/Z.ai — see channel/model-switch.ts).
+  // When DEFAULT_MODEL_TARGET=alt, multichat-entrypoint.sh uses these to
+  // build ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN itself on EVERY cold
+  // boot (first spawn AND idle-kill respawn), so a deployment can run
+  // entirely on the alt provider with no Anthropic credential configured
+  // at all. Same trust rationale as CLAUDE_CODE_OAUTH_TOKEN above: this is
+  // the session's own auth, not an orchestrator secret.
+  for (const key of [
+    'TELEGRAM_WEBHOOK_TOKEN',
+    'TELEGRAM_WEBHOOK_URL',
+    'TELEGRAM_WEBHOOK_PORT',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'DEFAULT_MODEL_TARGET',
+    'ALT_PROVIDER_BASE_URL',
+    'ALT_PROVIDER_TOKEN',
+    'ALT_PROVIDER_MODEL',
+  ]) {
     const val = parentEnv[key]
     if (val !== undefined && val !== '') {
       childEnv[key] = val
