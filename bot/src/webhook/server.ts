@@ -42,15 +42,13 @@ import {
 import { resolvePermissionGateAllowedUserIds } from '../config.js'
 import type { PermissionGateRelay } from '../channel/permission-gate-relay.js'
 import { sendChannelNotification, normalizeMeta } from '../channel/notify.js'
-import { toActivityEvent, toTodoWriteEvent } from '../hooks/claude-events.js'
+import { toActivityEvent } from '../hooks/claude-events.js'
 import type {
   AskUserQuestionRelay,
   AskUserQuestionResult,
 } from '../channel/ask-user-question.js'
 import { isShortId } from '../channel/short-id.js'
 import type { MemoryWriter } from '../memory/writer.js'
-import type { ProgressReporter } from '../status/progress-reporter.js'
-import type { TaskMirror } from '../status/task-mirror.js'
 import type { InboundWatcher } from '../telegram/watcher.js'
 import { resolveTopicSessionId, type ModelSwitchLike, type ModelSwitchResult, type ModelTarget } from '../channel/model-switch.js'
 import { getModelState, setModelState } from '../channel/model-state.js'
@@ -79,7 +77,7 @@ const PERMISSION_REQUEST_BODY_LIMIT_BYTES = 32 * 1024
 // request timeout, mirroring ASK_SOCKET_TIMEOUT_MARGIN_MS — the relay's clean
 // timeout verdict must win over a socket abort.
 const PERMISSION_SOCKET_TIMEOUT_MARGIN_MS = 15_000
-const DEFAULT_AGENT_ID = 'office2-channel'
+const DEFAULT_AGENT_ID = 'officeagent-channel'
 
 // Margin added on top of the configured AskUserQuestion timeout to set
 // the underlying socket-level request timeout. The plugin must observe
@@ -184,17 +182,6 @@ export interface WebhookDeps {
   // hook payload (UserPromptSubmit buffers, Stop writes recent.md +
   // verbose.jsonl). Throws are caught and logged — never block the 200.
   memoryWriter?: MemoryWriter
-  // ProgressReporter (2026-05-18): persistent activity thread sibling
-  // dispatch alongside statusManager. Optional so legacy paths and tests
-  // can omit it. Failures inside the reporter never propagate (it logs
-  // and swallows) so no error handling is required at the call site.
-  progressReporter?: ProgressReporter
-  // TaskMirror (PR-A2, 2026-05-20): third sibling that owns a rolling
-  // TodoWrite milestone message per chat. Optional — when absent, the
-  // dispatch block below is skipped. Errors inside `recordEvent` are
-  // logged and swallowed; we still defensively wrap in try/catch here
-  // to match the statusManager / progressReporter pattern.
-  taskMirror?: TaskMirror
   // PR-A3 (M3 fix): InboundWatcher — on session_stop the webhook clears
   // the per-chat debounce marker so a fresh session can auto-reply on its
   // very first inbound message without waiting for the previous session's
@@ -217,7 +204,7 @@ export interface WebhookDeps {
   // answers 503 and the hook degrades to a no-op (no read receipt, no crash).
   reactToMessage?: (chatId: string, messageId: number, emoji: string) => Promise<void>
   // 2026-06-03: DM fallback-reply capability. The owner's DM session
-  // normally answers through the `mcp__office2-channel__reply` MCP tool. When a
+  // normally answers through the `mcp__officeagent-channel__reply` MCP tool. When a
   // turn ends WITHOUT having sent such a reply, the fallback-reply Stop hook
   // posts the turn's final assistant text to POST /hooks/fallback-reply and we
   // send it via this capability — a fire-and-forget plain-text Telegram
@@ -391,8 +378,6 @@ async function handleRequest(
     mcpServer,
     statusManager,
     memoryWriter,
-    progressReporter,
-    taskMirror,
     watcher,
   } = deps
   const method = req.method ?? 'GET'
@@ -594,36 +579,6 @@ async function handleRequest(
         chat_id: payload.chatId,
         hook: payload.hook_event_name,
       })
-    }
-
-    if (progressReporter) {
-      try {
-        await progressReporter.recordEvent(payload.chatId, activityEvent)
-      } catch (err) {
-        log.warn('hook event progress update failed (ignored)', {
-          chat_id: payload.chatId,
-          hook: payload.hook_event_name,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
-
-    // PR-A2 (2026-05-20): TaskMirror handles TodoWrite + Stop hooks. The
-    // mapper returns null for every other event, so the cost when no
-    // TodoWrite is in flight is one schema test per hook — negligible.
-    if (taskMirror) {
-      const todoEvent = toTodoWriteEvent(payload, log)
-      if (todoEvent !== null) {
-        try {
-          await taskMirror.recordEvent(payload.chatId, todoEvent)
-        } catch (err) {
-          log.warn('hook event task mirror update failed (ignored)', {
-            chat_id: payload.chatId,
-            hook: payload.hook_event_name,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        }
-      }
     }
 
     // PR-A3 (M3 fix): on session_stop, clear the watcher's debounce marker
@@ -1223,7 +1178,7 @@ async function handlePermissionRequest(
 
 const ModelSwitchRouteSchema = z.object({
   pane: z.string().min(1).max(128),
-  target: z.enum(['glm', 'claude']),
+  target: z.enum(['alt', 'primary']),
 })
 const MODEL_SWITCH_BODY_LIMIT_BYTES = 4 * 1024
 const MULTICHAT_PANE_RE = /^multichat-(.+)$/

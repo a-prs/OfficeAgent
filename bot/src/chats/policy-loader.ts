@@ -36,7 +36,6 @@ export const ChatPolicySchema = z
   .object({
     mode: z.enum(['private', 'public']),
     streaming: z.enum(['progress', 'off']),
-    tmux_mirror: z.boolean(),
     edit_message_progress: z.boolean(),
     delivery: z.enum(['streamed', 'final_only']),
     persona_file: z.string().min(1),
@@ -347,29 +346,3 @@ export function shouldStreamForChat(
   return entry.streaming === 'progress'
 }
 
-/**
- * Fail-CLOSED tmux-mirror gate for a chat.
- *
- * Identical fail-closed semantics to {@link shouldStreamForChat} but
- * driven by the `tmux_mirror` boolean rather than `streaming`. Public
- * group chats with no entry in policy get `false` — the pane mirror
- * leaks tool calls, file paths, and reasoning chunks that must never
- * surface outside the owner's DM.
- *
- * Used by tmux-mirror.ts (in TASK-2).
- *
- * @param policy loaded multichat policy, or `null` when multichat
- *   is disabled (legacy DM mode)
- * @param chatId stringified Telegram chat id (validated)
- * @returns `true` when the rolling tmux pane mirror should run
- */
-export function shouldMirrorTmuxForChat(
-  policy: MultichatPolicy | null,
-  chatId: string,
-): boolean {
-  assertValidChatId(chatId)
-  if (policy === null) return true
-  const entry = policy.chats[chatId.replace(/_t\d+$/, '')]
-  if (entry === undefined) return false
-  return entry.tmux_mirror === true
-}

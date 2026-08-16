@@ -1,6 +1,6 @@
 // src/state/store.ts
 //
-// On-disk state for the office2-channel plugin.
+// On-disk state for the officeagent-channel plugin.
 // Reconstructed from tests/state.test.ts + src/config.ts (StatePaths).
 // Fix for upstream Issue #7: plugin/.gitignore line 6 (`state/`) excluded
 // this file from the original commit, breaking `bun install` from a clean

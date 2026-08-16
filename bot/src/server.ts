@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Forked from anthropics/claude-plugins-official/external_plugins/telegram (MIT).
-// Composition root for the office2-channel MCP server.
+// Composition root for the officeagent-channel MCP server.
 //
 // T3 split the monolithic plugin/server.ts into focused modules under src/.
 // This file wires them: env→config→state→telegram→mcp. Inbound message
@@ -40,10 +40,8 @@ import { createSafeTelegramApi } from './safety/safe-telegram-api.js'
 import { createRateLimitedTelegramApi } from './safety/rate-limited-telegram-api.js'
 import { redactSecrets } from './safety/redact.js'
 import { StatusManager } from './status/status-manager.js'
-import { ProgressReporter } from './status/progress-reporter.js'
-import { TaskMirror } from './status/task-mirror.js'
-import { TmuxMirror } from './status/tmux-mirror.js'
-import { ModelSwitch, resolveTopicSessionId } from './channel/model-switch.js'
+import type { ProgressReporterForWatcher } from './telegram/watcher.js'
+import { ModelSwitch, resolveTopicSessionId, readAltProviderToken } from './channel/model-switch.js'
 import { resetModelStateOnKill, setModelState } from './channel/model-state.js'
 import { loadPolicyFromPath, type MultichatPolicy } from './chats/policy-loader.js'
 import { MultichatRouter } from './router/multichat-router.js'
@@ -179,7 +177,7 @@ function prebootStateDir(): string {
   // for parity with config.ts (handles unset $HOME on macOS/Linux + Windows
   // USERPROFILE fallback).
   if (process.env.TELEGRAM_STATE_DIR) return process.env.TELEGRAM_STATE_DIR
-  return join(homedir(), '.claude', 'channels', 'office2-telegram-canary')
+  return join(homedir(), '.claude', 'channels', 'officeagent')
 }
 
 const STATE_ROOT_FOR_ENV = prebootStateDir()
@@ -277,7 +275,7 @@ if (env.GROQ_API_KEY) {
   logSecrets.push(env.GROQ_API_KEY)
   crashSecrets.push(env.GROQ_API_KEY)
 }
-const log = createLogger('office2-channel', { secrets: logSecrets })
+const log = createLogger('officeagent-channel', { secrets: logSecrets })
 
 // Lock down the env file to owner-only after we've read it.
 try {
@@ -288,10 +286,10 @@ try {
 
 // ─────────────────────────────────────────────────────────────────────
 // Multichat policy load (Phase 3, 2026-05-23). Default OFF. We load the
-// policy here so StatusManager and TmuxMirror can consult it per call
-// (`policy` constructor opt → fail-CLOSED `shouldStreamForChat` /
-// `shouldMirrorTmuxForChat` on every public method) and so server.ts
-// has a single, early failure point if the policy is malformed. Pool
+// policy here so StatusManager can consult it per call (`policy`
+// constructor opt → fail-CLOSED `shouldStreamForChat` on every public
+// method) and so server.ts has a single, early failure point if the
+// policy is malformed. Pool
 // and router are instantiated later — they depend on bot.api.
 //
 // Resolution order for the workspace dir:
@@ -428,7 +426,7 @@ const apiSecrets: string[] = [...logSecrets, env.TELEGRAM_BOT_TOKEN]
 const telegramApi = createSafeTelegramApi(rateLimitedTelegramApi, log, apiSecrets)
 
 const mcp = new Server(
-  { name: 'office2-channel', version: '1.0.0' },
+  { name: 'officeagent-channel', version: '1.0.0' },
   {
     capabilities: {
       tools: {},
@@ -465,70 +463,24 @@ const statusManager = new StatusManager({
   policy: multichatPolicy ?? null,
 })
 
-// ProgressReporter (2026-05-18) — separate persistent thread showing
-// per-tool activity in real time. StatusManager owns the transient
-// bubble (cancelled by reply()); ProgressReporter owns a thread that
-// survives. Both fire in parallel from the webhook handler.
-const progressReporter = new ProgressReporter({ telegramApi, config, log })
-
-// TaskMirror (PR-A2, 2026-05-20) — third rolling Telegram message per chat
-// showing Claude's TodoWrite milestones. Independent of the two surfaces
-// above; uses the same safe-wrapped telegramApi so every text/edit goes
-// through redact + HTML validation before leaving the process.
-const taskMirror = new TaskMirror({ telegramApi, config, log })
-
-// TmuxMirror (2026-05-20) — read-only mirror of the agent's terminal pane
-// into ONE rolling Telegram message. Default-OFF in config; the owner
-// opts in explicitly. When enabled without an explicit pane_target we
-// fall back to `channel-agent-c:0.0` — the canonical session for this
-// plugin on Agent-c VPS.
-let tmuxMirror: TmuxMirror | null = null
-if (config.tmux_mirror.enabled) {
-  const target = config.tmux_mirror.pane_target || 'channel-agent-c:0.0'
-  const mirrorChatId = String(config.allowed_chat_ids[0] ?? '')
-  if (mirrorChatId === '') {
-    log.warn('tmux mirror enabled but no allowed_chat_ids configured — skipping')
-  } else {
-    // Multichat gate: the mirror gates fail-closed against its own
-    // `chatId` via `shouldMirrorTmuxForChat(policy, chatId)` on every
-    // public entry point. A `tmux_mirror: false` chat in policy
-    // (typically a public group) turns the mirror into a no-op
-    // shell — pane content never reaches Telegram. Pre-fix (codex
-    // review 2026-05-27, HIGH #9) we passed a pre-resolved boolean
-    // derived from the owner's chat id; that fail-open path
-    // leaked pane content into chats absent from policy.
-    tmuxMirror = new TmuxMirror({
-      api: telegramApi,
-      log,
-      chatId: mirrorChatId,
-      paneTarget: target,
-      socketName: config.tmux_mirror.socket_name,
-      pollIntervalMs: config.tmux_mirror.poll_interval_ms,
-      lineCount: config.tmux_mirror.line_count,
-      hideSegments: config.tmux_mirror.hide_segments,
-      mode: config.tmux_mirror.mode,
-      maxLines: config.tmux_mirror.max_lines,
-      redact: (text) => redactSecrets(text, apiSecrets),
-      policy: multichatPolicy ?? null,
-    })
-    void tmuxMirror.start().catch((err: unknown) => {
-      log.warn('tmux mirror start failed', {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    })
-    // Best-effort cleanup on process exit: delete the rolling message so
-    // a stale «terminal mirror» card doesn't sit in the chat forever.
-    const shutdownMirror = (): void => {
-      tmuxMirror?.stop().catch(() => {
-        /* already logged inside stop() */
-      })
-    }
-    process.once('SIGINT', shutdownMirror)
-    process.once('SIGTERM', shutdownMirror)
-  }
+// ProgressReporter / TaskMirror / TmuxMirror were all Telegram-surfaces
+// that existed only to mirror the terminal or duplicate StatusManager's
+// activity bubble in a persistent thread — cut per OfficeAgent plan §0.1
+// category 1 (terminal-mirror / dashboard-only code). StatusManager (the
+// transient status bubble + TTL-guard) is the sole remaining activity
+// surface. InboundWatcher below only needs a narrow read-only busy-check,
+// so it gets a thin adapter over statusManager instead of a dedicated
+// ProgressReporter instance — busy detection degrades from
+// per-tool-elapsed-time precision to a coarse isActive() check, and
+// active-tool-name is unavailable (undefined). Acceptable trade for
+// removing ~2700 lines of terminal-mirror machinery; revisit if the
+// coarser busy-check proves too eager/lazy in practice.
+const progressReporterAdapter: ProgressReporterForWatcher = {
+  isBusy: (chatId: string, _thresholdMs: number) => statusManager.isActive(chatId),
+  getActiveToolName: (_chatId: string) => undefined,
 }
 
-// ModelSwitch (2026-07-27) — /model glm|claude. The pane target is resolved
+// ModelSwitch — /model alt|primary. The pane target is resolved
 // from THIS process's own tmux session, never hardcoded — a wrong target
 // here would kill the wrong pane. If the process isn't running inside tmux
 // (e.g. local dev with `claude` run directly), resolution fails and the
@@ -537,19 +489,31 @@ let modelSwitch: ModelSwitch | null = null
 // Captured alongside modelSwitch so the webhook /hooks/model/* routes
 // (2026-07-30) can tell "this request targets the master pane" apart from
 // "this targets a topic pane" without reaching into ModelSwitch's private
-// fields — see modelSwitchUi wiring near startWebhookServer below.
+// fields — see modelSwitchUi wiring near startWebhookServer below. Also
+// reused as the keypad callback's master-pane fallback target (below),
+// independent of whether alt_provider is configured — so resolve it
+// unconditionally whenever the process is running inside tmux.
 let masterPaneTarget: string | undefined
-if (config.model_switch.enabled) {
+try {
+  const resolvedPaneTarget = execFileSync('tmux', ['display-message', '-p', '#S'], {
+    encoding: 'utf8',
+    timeout: 5000,
+  }).trim()
+  if (resolvedPaneTarget !== '') masterPaneTarget = resolvedPaneTarget
+} catch {
+  // Not running inside tmux (e.g. local dev with `claude` run directly) —
+  // masterPaneTarget stays undefined; both ModelSwitch and the keypad
+  // fallback degrade to "unavailable" rather than guessing a target.
+}
+if (config.alt_provider.enabled && masterPaneTarget !== undefined) {
   try {
-    const paneTarget = execFileSync('tmux', ['display-message', '-p', '#S'], {
-      encoding: 'utf8',
-      timeout: 5000,
-    }).trim()
-    if (paneTarget === '') throw new Error('empty tmux session name')
+    const paneTarget = masterPaneTarget
     modelSwitch = new ModelSwitch({
       paneTarget,
-      glmEnvFile: config.model_switch.glm_env_file,
-      glmModel: config.model_switch.glm_model,
+      altProviderBaseUrl: config.alt_provider.base_url,
+      altProviderToken: readAltProviderToken(config.alt_provider.token_env),
+      altProviderModel: config.alt_provider.model,
+      altProviderLabel: config.alt_provider.label,
       // Lets topic switches relaunch through multichat-entrypoint.sh (see
       // model-switch.ts, 2026-07-30 inbox-watcher fix) instead of a bare
       // claude respawn. Omitted entirely (not just undefined —
@@ -561,7 +525,6 @@ if (config.model_switch.enabled) {
         : {}),
       log,
     })
-    masterPaneTarget = paneTarget
     log.info('model switch enabled', { paneTarget })
   } catch (err) {
     log.warn('model switch enabled in config but not running inside tmux — skipping', {
@@ -576,27 +539,28 @@ const modelSwitchStateFilePath = join(statePaths.root, 'model-switch-state.json'
 // Self-check on boot (2026-07-30): the master's own switch (unlike a
 // topic's) always kills THIS process the instant `tmux respawn-pane -k`
 // fires — nothing queued after that call is guaranteed to run, so the
-// master can never reliably self-report "I just switched to glm" from
-// inside the switch itself. Instead, every fresh master process (whether
-// booted by systemd's default ExecStart or by a /model respawn) reports
-// its OWN actual state at startup by reading its own argv — this is what
-// makes the master's status entry converge to truth after any restart
-// path, not just switches that went through this codebase.
+// master can never reliably self-report "I just switched to the alt
+// provider" from inside the switch itself. Instead, every fresh master
+// process (whether booted by systemd's default ExecStart or by a /model
+// respawn) reports its OWN actual state at startup by reading its own
+// argv — this is what makes the master's status entry converge to truth
+// after any restart path, not just switches that went through this
+// codebase.
 if (modelSwitch !== null && masterPaneTarget !== undefined) {
-  const bootedAsGlm = process.argv.includes('--model')
-  void setModelState(modelSwitchStateFilePath, masterPaneTarget, bootedAsGlm ? 'glm' : 'claude', log)
+  const bootedOnAlt = process.argv.includes('--model')
+  void setModelState(modelSwitchStateFilePath, masterPaneTarget, bootedOnAlt ? 'alt' : 'primary', log)
 }
 
-// InboundWatcher (PR-A3, 2026-05-20) — auto-reply «Тралл занят» when the
-// owner sends plain text while ProgressReporter says the session is
-// mid-tool. The watcher receives `progressReporter` for read-only busy
-// detection — never mutates reporter state. Debounce + safe-api enforced
-// inside the watcher.
+// InboundWatcher (PR-A3, 2026-05-20) — auto-reply «занят» when the owner
+// sends plain text while the session looks busy. Receives the
+// progressReporterAdapter (statusManager.isActive() wrapper — see above)
+// for read-only busy detection. Debounce + safe-api enforced inside the
+// watcher.
 const inboundWatcher = new InboundWatcher({
   telegramApi,
   config,
   log,
-  progressReporter,
+  progressReporter: progressReporterAdapter,
 })
 
 // Phase 8 / T7: MemoryWriter persists turns to <workspace>/core/hot/recent.md
@@ -745,12 +709,13 @@ bot.on('callback_query:data', async ctx => {
           ['-L', 'default', 'send-keys', '-t', sessionName, ...keys],
           { timeout: 5000 })
         await ctx.answerCallbackQuery({ text: data.slice(3) })
-      } else if (allowed && keys && config.tmux_mirror?.enabled) {
-        const sock = config.tmux_mirror.socket_name
-          ? ['-L', config.tmux_mirror.socket_name]
-          : []
+      } else if (allowed && keys && masterPaneTarget !== undefined) {
+        // Master-pane fallback: reuse the same pane target ModelSwitch
+        // resolved at boot (own tmux session name) — there is no longer a
+        // dedicated tmux_mirror.pane_target config (terminal mirror cut,
+        // plan §0.1 category 1).
         execFileSync('tmux',
-          [...sock, 'send-keys', '-t', config.tmux_mirror.pane_target, ...keys],
+          ['send-keys', '-t', masterPaneTarget, ...keys],
           { timeout: 5000 })
         await ctx.answerCallbackQuery({ text: data.slice(3) })
       } else {
@@ -764,15 +729,15 @@ bot.on('callback_query:data', async ctx => {
     }
     return
   }
-  // model-switch (2026-07-30): inline-keyboard taps for /model. `model:glm`
-  // / `model:claude` — implicit target = whichever pane the tapped message
+  // model-switch (2026-07-30): inline-keyboard taps for /model. `model:alt`
+  // / `model:primary` — implicit target = whichever pane the tapped message
   // lives in (master DM if no message_thread_id, else that topic — same
   // thread/chat inspection the kp: handler above already does). Owner-only,
   // same allowlist check as kp:.
   if (data.startsWith('model:')) {
     const target = data.slice('model:'.length)
     try {
-      if (target !== 'glm' && target !== 'claude') {
+      if (target !== 'alt' && target !== 'primary') {
         await ctx.answerCallbackQuery({ text: 'bad target' })
         return
       }
@@ -787,7 +752,7 @@ bot.on('callback_query:data', async ctx => {
       const modelThreadId = cbMsg3?.message_thread_id
       const modelChatId = cbMsg3?.chat?.id
       const isTopic = modelThreadId !== undefined && modelChatId !== undefined
-      const label = target === 'glm' ? 'GLM 5.2 (Z.ai)' : 'Claude'
+      const label = target === 'alt' ? (config.alt_provider.label || 'Alternative model') : 'Primary'
       // Ack the tap + send the confirmation BEFORE calling switchTo, same
       // ordering constraint as oob.ts's pendingModelSwitch: for the master
       // pane, switchTo kills THIS very process — nothing queued after it is
@@ -1061,9 +1026,7 @@ const handlerDeps: HandlerDeps = {
   statusManager,
   albumBuffer,
   watcher: inboundWatcher,
-  // Optional /mirror control surface — undefined when tmux_mirror.enabled=false.
-  ...(tmuxMirror !== null ? { tmuxMirror } : {}),
-  // Optional /model control surface — undefined when model_switch.enabled=false
+  // Optional /model control surface — undefined when alt_provider.enabled=false
   // or pane-target resolution failed at startup.
   ...(modelSwitch !== null ? { modelSwitch } : {}),
   // Same constant as above, threaded through so the in-topic /model branch
@@ -1221,8 +1184,6 @@ try {
     statePaths,
     log,
     statusManager,
-    progressReporter,
-    taskMirror,
     watcher: inboundWatcher,
     ...(memoryWriter !== undefined ? { memoryWriter } : {}),
     // PRX-1 TASK-3 (2026-05-27): AskUserQuestion HTTP relay routes.

@@ -1,6 +1,7 @@
 // Config loader with Zod validation and state-dir path resolution.
-// All env vars and config.json keys are validated at boundary; defaults
-// embed canary values (bot 8507713167, prince 164795011).
+// All env vars and config.json keys are validated at boundary. There are
+// NO default bot_id / owner ids baked in — every self-hosted install must
+// supply its own via config.json or env (see .env.example / INSTALL.md).
 
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
@@ -34,7 +35,9 @@ export const MultichatConfigSchema = z.object({
 export type MultichatConfig = z.infer<typeof MultichatConfigSchema>
 
 export const AppConfigSchema = z.object({
-  bot_id: z.number().int().positive().default(8507713167),
+  // No default — every self-hosted install MUST configure its own bot_id
+  // (from BotFather / getMe) via config.json or TELEGRAM_EXPECTED_BOT_ID.
+  bot_id: z.number().int().positive(),
   // `dm_only` predates the multichat router. With `multichat.enabled=false`
   // (default) the legacy gate.ts behaviour is preserved: DM-only with
   // hardcoded drop in the gate. With `multichat.enabled=true` the gate
@@ -42,8 +45,11 @@ export const AppConfigSchema = z.object({
   // ignored. Kept here for backward compatibility with existing
   // config.json files; do NOT remove without a migration pass.
   dm_only: z.boolean().default(true),
-  allowed_user_ids: z.array(z.number().int().positive()).min(1).default([164795011]),
-  allowed_chat_ids: z.array(z.union([z.number(), z.string()])).default([164795011]),
+  // No default — the owner's Telegram user id is instance-specific and
+  // MUST be supplied (config.json or TELEGRAM_ALLOWED_USER_IDS env).
+  allowed_user_ids: z.array(z.number().int().positive()).min(1),
+  // No default — see allowed_user_ids above (TELEGRAM_ALLOWED_CHAT_IDS).
+  allowed_chat_ids: z.array(z.union([z.number(), z.string()])).default([]),
   workspace_root: z.string().optional(),
   // 2026-06-09 duplicate-windows fix: StatusManager and ProgressReporter
   // both defaulted ON, so a fresh install with hooks registered rendered two
@@ -77,7 +83,9 @@ export const AppConfigSchema = z.object({
   }).default({}),
   permission_relay: z.object({
     enabled: z.boolean().default(true),
-    allowed_user_ids: z.array(z.number().int().positive()).default([164795011]),
+    // No default — inherits allowed_user_ids at the point of use if unset
+    // (empty array here just means "no explicit override").
+    allowed_user_ids: z.array(z.number().int().positive()).default([]),
     bash_only_proof: z.boolean().default(true),
   }).default({}),
   commands: z.object({
@@ -166,88 +174,26 @@ export const AppConfigSchema = z.object({
     debounce_ms: z.number().int().nonnegative().default(10_000),
     busy_threshold_ms: z.number().int().positive().default(30_000),
   }).default({}),
-  // TmuxMirror (2026-05-20) — read-only view of the agent's terminal pane
-  // mirrored into one rolling Telegram message via editMessageText. Pulls
-  // `tmux capture-pane` on a timer, dedups by hash, and self-heals when
-  // the message is deleted (re-sends on next poll).
+  // /model command. Kills+respawns the session's own tmux pane on a
+  // different model/backend (primary Claude subscription/API <-> an
+  // optional alternative OpenAI-compatible-ish Anthropic provider),
+  // preserving conversation context via `claude --continue`. Default OFF
+  // — the pane target is resolved at startup from the running process's
+  // own tmux session (`tmux display-message -p '#S'`), never hardcoded.
   //
-  // Default-OFF: pane content can include unexpected secrets, and the
-  // owner should opt in explicitly. Enable via config.json or env.
-  // pane_target follows the `session:window.pane` syntax — empty string
-  // means «use the session in $TMUX env at startup».
-  tmux_mirror: z.object({
+  // Generalized per plan §0.4: the three things that used to be hardcoded
+  // to our own Z.ai/GLM deployment (base URL, model id, token file path)
+  // are now plain config/env with NO default value — an install that
+  // doesn't configure an alt provider simply never offers the `/model`
+  // switch (see readAltProviderToken()). `token_env` names the process
+  // env var holding the raw token (e.g. ALT_PROVIDER_TOKEN) rather than a
+  // file path, so the token lives in the instance's own `.env`.
+  alt_provider: z.object({
     enabled: z.boolean().default(false),
-    pane_target: z.string().default(''),
-    // tmux socket name (`tmux -L <name>`). Empty = default socket. Needed
-    // when the channel unit runs its session on a dedicated socket (two
-    // Type=forking channel units on one host race at boot on the default
-    // socket) — capture-pane must address the same socket or it finds
-    // nothing (Arthas migration, 2026-06-05).
-    socket_name: z.string().default(''),
-    poll_interval_ms: z.number().int().min(500).default(5000),
-    line_count: z.number().int().min(5).max(500).default(50),
-    // Segments to drop from the rendered mirror. Default hides the boot
-    // banner (Claude Code splash + email + path), the inbound-injection
-    // warning, the footer hints (bypass-perms, auto-update, focus-events,
-    // /btw Tip line) AND the input box (the bordered prompt area —
-    // ── separators + ❯/> cursor). `inbound_preview` stays visible by
-    // default because `latest_inbound_only` mode anchors on it; hiding
-    // it would silently turn the mode into a no-op (filter applies mode
-    // BEFORE hide, but only `latest_inbound_only` survives that order —
-    // see tmux-pane-filter.filterPane). Pass an empty list to mirror
-    // raw pane content. Validated against the SegmentType enum to keep
-    // typos out of production — bad values fail config load loud.
-    hide_segments: z
-      .array(
-        z.enum([
-          'boot_banner',
-          'inbound_warning',
-          'channel_status',
-          'conversation',
-          'footer_hints',
-          'input_box',
-          'inbound_preview',
-        ]),
-      )
-      .default(['boot_banner', 'inbound_warning', 'footer_hints', 'input_box']),
-    // Anchor mode for the rolling mirror. `latest_inbound_only` (default,
-    // 2026-05-22) drops every pane segment up to and including the last
-    // `← <channel>: …` preview Claude Code emitted — only what the agent
-    // is doing AFTER the owner's most recent message remains. Falls
-    // back to `full_pane` automatically when no preview exists in the
-    // current capture (fresh session). Set to `full_pane` to mirror the
-    // whole pane (pre-2026-05-22 behaviour).
-    mode: z.enum(['full_pane', 'latest_inbound_only']).default('latest_inbound_only'),
-    // Max lines kept in the rendered mirror, post-filter. Default 14 —
-    // empirically that fits one iPhone-screen worth of Telegram <pre>
-    // content (the owner asked for ≤70% screen height on 2026-05-22).
-    // Truncation removes from the TOP (oldest), preserving the live
-    // tail, and prepends a `… +N lines` marker that counts toward the
-    // cap. Set to 0 to disable (uncapped, only the 4096-char body cap
-    // in renderBody still applies). Codex review 2026-05-22 [medium]
-    // tightened the allowed range to `0` or `4..100` — values 1..3
-    // render only the marker plus 0..2 lines, which is degenerate and
-    // not useful in production.
-    max_lines: z
-      .number()
-      .int()
-      .refine((n) => n === 0 || (n >= 4 && n <= 100), {
-        message: 'max_lines must be 0 (disabled) or an integer in 4..100',
-      })
-      .default(14),
-  }).default({}),
-  // /model command (2026-07-27). Kills+respawns the session's own tmux pane
-  // on a different model/backend (Claude <-> GLM 5.2 via Z.ai), preserving
-  // conversation context via `claude --continue`. Default OFF — the pane
-  // target is resolved at startup from the running process's own tmux
-  // session (`tmux display-message -p '#S'`), never hardcoded or taken from
-  // tmux_mirror.pane_target, because a wrong target here kills the wrong
-  // pane. glm_env_file holds `ZAI_AUTH_TOKEN=...` (config/env/glm-fallback.env,
-  // the same key claude-fallback.sh already uses for the cron fallback).
-  model_switch: z.object({
-    enabled: z.boolean().default(false),
-    glm_env_file: z.string().default('/home/office/multi2/config/env/glm-fallback.env'),
-    glm_model: z.string().default('glm-5.2'),
+    base_url: z.string().optional(),
+    token_env: z.string().default('ALT_PROVIDER_TOKEN'),
+    model: z.string().optional(),
+    label: z.string().default('Alternative model'),
   }).default({}),
   // Multichat router (Phase 3, 2026-05-23). Default OFF. When enabled,
   // server.ts loads `chats/policy.yaml`, instantiates TmuxSessionPool +
@@ -458,7 +404,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   // Resolve state dir (we need it to find default config.json path).
   const stateRoot = parsedEnv.TELEGRAM_STATE_DIR
-    ?? join(homedir(), '.claude', 'channels', 'office2-telegram-canary')
+    ?? join(homedir(), '.claude', 'channels', 'officeagent')
   const configPath = parsedEnv.TELEGRAM_CONFIG_FILE ?? join(stateRoot, 'config.json')
 
   // Read config.json if it exists. Missing file is fine — defaults apply.
@@ -598,7 +544,7 @@ export type StatePaths = {
 }
 
 export function getStatePaths(_config: AppConfig, env: RuntimeEnv): StatePaths {
-  const root = env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'office2-telegram-canary')
+  const root = env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'officeagent')
   return {
     root,
     env: join(root, '.env'),

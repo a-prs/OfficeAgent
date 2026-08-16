@@ -6,7 +6,7 @@
 //   * Never write the bearer token. The hook command pulls
 //     TELEGRAM_WEBHOOK_TOKEN from the agent's process env at runtime.
 //   * Preserve unrelated keys and existing hook entries.
-//   * Stable marker — `hooks[event][].marker = "office2-channel-hook"` — lets
+//   * Stable marker — `hooks[event][].marker = "officeagent-channel-hook"` — lets
 //     re-runs replace the previous entry instead of duplicating.
 //   * Atomic write through a temp file in the same dir so a partial write
 //     cannot corrupt settings.json.
@@ -16,19 +16,19 @@
 //     --settings /path/to/settings.json \
 //     --chat-id 164795011 \
 //     --webhook-url http://127.0.0.1:8089/hooks/agent \
-//     [--agent-id office2-channel] \
+//     [--agent-id officeagent-channel] \
 //     [--helper /abs/path/to/post-hook.ts]
 
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'fs'
 import { dirname, resolve as pathResolve } from 'path'
 import { fileURLToPath } from 'url'
 
-const MARKER = 'office2-channel-hook'
+const MARKER = 'officeagent-channel-hook'
 // Permission-gate PreToolUse hook (2026-06-09). Distinct marker so it
 // installs/updates alongside the notification-mirror hook without either
 // clobbering the other. Only added when --permission-gate-helper is given.
-const GATE_MARKER = 'office2-permission-gate-hook'
-// Substring of the office2 helper script path used to identify *markerless*
+const GATE_MARKER = 'officeagent-permission-gate-hook'
+// Substring of the helper script path used to identify *markerless*
 // legacy entries — re-running install over a settings file that was
 // hand-edited (no marker but pointing at our post-hook.ts) used to leave
 // the legacy entry in place + append the marked one, firing the hook
@@ -151,7 +151,7 @@ function buildGateEntry(opts: PatchOptions): HookEntry {
 // the marker was hand-stripped or never present. Survives different
 // absolute prefixes (e.g. user moved the plugin between dirs) by matching
 // the trailing `post-hook.ts` filename inside the command string.
-function isLegacyOffice2Entry(entry: HookEntry | undefined): boolean {
+function isLegacyMarkerlessEntry(entry: HookEntry | undefined): boolean {
   if (!entry || !Array.isArray(entry.hooks)) return false
   for (const h of entry.hooks) {
     if (h && typeof h.command === 'string' && h.command.includes(HELPER_PATH_FINGERPRINT)) {
@@ -172,7 +172,7 @@ export function applyPatch(settings: SettingsShape, opts: PatchOptions): Setting
     // markerless notification entry, OR the gate marker (re-added below for
     // PreToolUse). Unrelated entries survive untouched.
     const filtered = existing.filter(
-      (e) => !e || (e.marker !== MARKER && e.marker !== GATE_MARKER && !isLegacyOffice2Entry(e)),
+      (e) => !e || (e.marker !== MARKER && e.marker !== GATE_MARKER && !isLegacyMarkerlessEntry(e)),
     )
     const rebuilt = [...filtered, next]
     // The gate hook lives on PreToolUse only, and is registered FIRST so its

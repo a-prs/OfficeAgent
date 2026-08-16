@@ -1,22 +1,30 @@
 // model-switch.ts — kill+respawn a claude tmux pane with a different
 // model/backend, preserving conversation context via `claude --continue`.
 //
-// Validated live 2026-07-27 on an isolated scratch tmux session: Sonnet 5 ->
-// GLM 5.2 (Z.ai) -> back to Sonnet 5. A planted secret survived both
-// switches intact — `--continue` resumes the most recent session in the
-// pane's cwd, no session-id lookup needed. `tmux respawn-pane -k` replaces
-// the pane's running process without tearing down the tmux session/window,
-// so hooks and other automation addressing the same pane target keep working.
+// Generalized (plan §0.4): the "alternative provider" is any second
+// Anthropic-API-compatible endpoint the owner configures via ALT_PROVIDER_*
+// env vars — historically our own deployment always pointed this at Z.ai's
+// GLM models, but nothing here is Z.ai-specific anymore. Validated live
+// against Z.ai's endpoint on 2026-07-27 on an isolated scratch tmux
+// session: primary -> alt -> back to primary. A planted secret survived
+// both switches intact — `--continue` resumes the most recent session in
+// the pane's cwd, no session-id lookup needed. `tmux respawn-pane -k`
+// replaces the pane's running process without tearing down the tmux
+// session/window, so hooks and other automation addressing the same pane
+// target keep working.
 //
 // Why this exists (not just /reset or /new): those commands start a FRESH
 // session (no context carried over). This one preserves context across a
 // forced model switch — the point is to keep working through a Claude Max
-// session-limit hit, not to start over.
+// session-limit hit (or a rate-limited alt provider), not to start over.
+//
+// If ALT_PROVIDER_TOKEN (or whatever token_env names) is unset, the /model
+// command simply never offers the alt target — see oob.ts.
 
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { dirname, resolve } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -38,7 +46,7 @@ const DISMISS_SCRIPT_PATH = resolve(
   'dismiss-dev-channels.sh',
 )
 
-export type ModelTarget = 'glm' | 'claude'
+export type ModelTarget = 'primary' | 'alt'
 
 export interface ModelSwitchOptions {
   // tmux target, `session` or `session:window.pane` syntax.
@@ -46,10 +54,19 @@ export interface ModelSwitchOptions {
   // Optional tmux socket name (`tmux -L <name>`), for hosts running the
   // channel unit on a dedicated socket.
   socketName?: string
-  // Path to the env file holding `ZAI_AUTH_TOKEN=...` (config/env/glm-fallback.env).
-  glmEnvFile: string
-  // Defaults to the GLM model claude-fallback.sh already uses in production.
-  glmModel?: string
+  // Base URL of the alternative Anthropic-API-compatible provider
+  // (ALT_PROVIDER_BASE_URL). Required only when target === 'alt' is
+  // actually used — see readAltProviderToken()/oob.ts gating.
+  altProviderBaseUrl?: string | undefined
+  // Raw bearer token for the alt provider, already resolved from
+  // process.env[config.alt_provider.token_env] by the caller — this class
+  // never reads env files or env vars itself (§0.4: no our-specific token
+  // file path baked in).
+  altProviderToken?: string | undefined
+  // Model id to pass with `--model` when switching to the alt provider.
+  altProviderModel?: string | undefined
+  // Human-readable label for Telegram UI (config.alt_provider.label).
+  altProviderLabel?: string
   // Only needed for TOPIC switches (see TopicSwitchOverride below). Lets
   // switchTo relaunch a respawned topic pane through
   // `{multichatWorkspaceDir}/chats/hooks/multichat-entrypoint.sh` — the
@@ -75,7 +92,7 @@ export interface ModelSwitchResult {
 // multichat-entrypoint.sh:523-531 and tmux-session-pool.ts's chatsBasePath
 // comments (2026-07-29 per-topic model-switch investigation):
 //   * They never load `--dangerously-load-development-channels` (no
-//     office2-channel MCP plugin — driven by the file-based inbox/outbox
+//     officeagent-channel MCP plugin — driven by the file-based inbox/outbox
 //     bridge instead), so channelFlag must NOT be included.
 //   * They always run with `--permission-mode bypassPermissions`.
 //   * They all share ONE cwd (chatsBasePath), so `claude --continue`
@@ -92,18 +109,14 @@ export interface TopicSwitchOverride {
   sessionId: string
 }
 
-function readZaiToken(path: string): string | undefined {
-  let raw: string
-  try {
-    raw = readFileSync(path, 'utf8')
-  } catch {
-    return undefined
-  }
-  for (const line of raw.split('\n')) {
-    const m = /^ZAI_AUTH_TOKEN=(.*)$/.exec(line.trim())
-    if (m && m[1]) return m[1].trim()
-  }
-  return undefined
+// Reads the alt-provider token from the CURRENT process env, keyed by the
+// env var name the owner configured (config.alt_provider.token_env,
+// default ALT_PROVIDER_TOKEN) — never from a file path baked into the
+// image. Empty/whitespace-only values count as unset.
+export function readAltProviderToken(tokenEnvName: string): string | undefined {
+  const raw = process.env[tokenEnvName]
+  const trimmed = raw?.trim()
+  return trimmed ? trimmed : undefined
 }
 
 // Single-quote for POSIX shell: close, escaped literal quote, reopen.
@@ -140,17 +153,20 @@ function cwdToProjectDirName(cwd: string): string {
   return cwd.replace(/[/.]/g, '-')
 }
 
-// Transcript corruption found live 2026-07-29: while a session ran under
-// GLM 5.2 (Z.ai), a built-in server-executed tool call (e.g. analyze_image)
-// got persisted as a `server_tool_use` content block whose `id` is in
-// Z.ai/OpenAI's `call_...` shape instead of Anthropic's required
-// `^srvtoolu_[a-zA-Z0-9_]+$` pattern. Z.ai's Anthropic-compatible endpoint
-// accepts that shape back on retry, but the REAL Anthropic API validates
-// history strictly — once that block is anywhere in the transcript,
-// EVERY future turn on `claude --continue` 400s permanently (a restart
-// does not help; it replays the same poisoned history). Confirmed via the
-// crashed session's own transcript: `messages.41.content.3.server_tool_use.id`
-// traced to a glm-5.2-authored block with id `call_52e9b768d60546b481e23679`.
+// Transcript corruption found live 2026-07-29 against our own alt
+// provider at the time (Z.ai/GLM): while a session ran on an alt provider
+// whose Anthropic-compatible endpoint is itself a thin shim over an
+// OpenAI-shaped backend, a built-in server-executed tool call (e.g.
+// analyze_image) got persisted as a `server_tool_use` content block whose
+// `id` is in OpenAI's `call_...` shape instead of Anthropic's required
+// `^srvtoolu_[a-zA-Z0-9_]+$` pattern. Such a shim's own endpoint accepts
+// that shape back on retry, but the REAL Anthropic API validates history
+// strictly — once that block is anywhere in the transcript, EVERY future
+// turn on `claude --continue` 400s permanently (a restart does not help;
+// it replays the same poisoned history). This sanitizer is provider-
+// agnostic: it just repairs any malformed `server_tool_use.id` before a
+// switch back to the primary provider, regardless of which alt provider
+// produced it.
 //
 // Fix: before switching a pane TO claude, scan the pane cwd's most
 // recently modified session transcript (the one `--continue` will resume)
@@ -295,14 +311,13 @@ export class ModelSwitch implements ModelSwitchLike {
   }
 
   async switchTo(target: ModelTarget, topic?: TopicSwitchOverride): Promise<ModelSwitchResult> {
-    const { socketName, glmEnvFile, log } = this.opts
-    const glmModel = this.opts.glmModel ?? 'glm-5.2'
+    const { socketName, altProviderBaseUrl, altProviderToken, altProviderModel, log } = this.opts
     const paneTarget = topic?.paneTarget ?? this.opts.paneTarget
 
     // CRITICAL: must match the systemd ExecStart flag (`claude
-    // --dangerously-load-development-channels server:office2-channel`) or the
+    // --dangerously-load-development-channels server:officeagent-channel`) or the
     // respawned pane resumes the conversation via --continue but boots
-    // WITHOUT the office2-channel plugin — no Telegram bridge, no reply/
+    // WITHOUT the officeagent-channel plugin — no Telegram bridge, no reply/
     // download_attachment tools, no inbound notification path. Confirmed
     // 2026-07-27: this omission is the likely cause of the DM message-loss
     // incident that required a full `systemctl restart` to recover (a plain
@@ -311,18 +326,18 @@ export class ModelSwitch implements ModelSwitchLike {
     // TopicSwitchOverride doc comment) — omit the flag for them entirely.
     const channelFlag = topic
       ? ''
-      : ' --dangerously-load-development-channels server:office2-channel'
+      : ' --dangerously-load-development-channels server:officeagent-channel'
 
-    // Only the glm -> claude direction is at risk (see
-    // sanitizeServerToolUseIds' doc comment) — Z.ai's endpoint accepts
-    // whatever shape it itself produced, so there is nothing to repair
-    // when switching TO glm. Best-effort: never let a sanitize failure
-    // block the actual switch.
+    // Only the alt -> primary direction is at risk (see
+    // sanitizeServerToolUseIds' doc comment) — an alt provider's own
+    // endpoint accepts whatever shape it itself produced, so there is
+    // nothing to repair when switching TO alt. Best-effort: never let a
+    // sanitize failure block the actual switch.
     // Topic panes are ALWAYS spawned on the literal `default` tmux socket
-    // (tmux-session-pool.ts spawns with no `-L`, and deliberately excludes
+    // (topic-session-pool.ts spawns with no `-L`, and deliberately excludes
     // TMUX from the child env allowlist so a topic never inherits the
     // master's ambient socket). A master running on a dedicated
-    // `tmux_mirror.socket_name` must NOT apply that socket to topic tmux
+    // socket (config.socket_name) must NOT apply that socket to topic tmux
     // calls — otherwise every topic switch silently targets the wrong
     // server and reports "pane not found" for a pane that IS running.
     // Two sibling call sites already hardcode `-L default` for topic panes
@@ -330,7 +345,7 @@ export class ModelSwitch implements ModelSwitchLike {
     // matched here (2026-07-30 adversarial review finding).
     const targetSocketArgs = topic ? ['-L', 'default'] : socketName ? ['-L', socketName] : []
 
-    if (target === 'claude') {
+    if (target === 'primary') {
       try {
         const sockArgs = targetSocketArgs
         const { stdout } = await execFileAsync(
@@ -350,14 +365,19 @@ export class ModelSwitch implements ModelSwitchLike {
       }
     }
 
-    // Read the GLM token once, up front — both the topic and master
-    // branches below need it for target === 'glm'.
-    let glmToken: string | undefined
-    if (target === 'glm') {
-      glmToken = readZaiToken(glmEnvFile)
-      if (!glmToken) {
-        log.warn('model-switch: missing ZAI_AUTH_TOKEN', { glmEnvFile })
-        return { ok: false, target, error: 'missing ZAI_AUTH_TOKEN in glm env file' }
+    // Validate the alt-provider config once, up front — both the topic
+    // and master branches below need it for target === 'alt'. Caller
+    // (oob.ts) is expected to have already gated the /model UI on
+    // altProviderToken being set, but we fail closed here too rather than
+    // trust that invariant blindly.
+    if (target === 'alt') {
+      if (!altProviderToken) {
+        log.warn('model-switch: missing alt provider token')
+        return { ok: false, target, error: 'alt provider token not configured' }
+      }
+      if (!altProviderBaseUrl) {
+        log.warn('model-switch: missing alt provider base_url')
+        return { ok: false, target, error: 'alt provider base_url not configured' }
       }
     }
 
@@ -412,25 +432,29 @@ export class ModelSwitch implements ModelSwitchLike {
           `CLAUDE_WORKSPACE_DIR=${shellQuote(multichatWorkspaceDir!)}`,
         )
       }
-      if (target === 'glm') {
+      if (target === 'alt') {
         envAssignments.push(
-          `ANTHROPIC_BASE_URL=${shellQuote('https://api.z.ai/api/anthropic')}`,
-          `ANTHROPIC_AUTH_TOKEN=${shellQuote(glmToken!)}`,
+          `ANTHROPIC_BASE_URL=${shellQuote(altProviderBaseUrl!)}`,
+          `ANTHROPIC_AUTH_TOKEN=${shellQuote(altProviderToken!)}`,
         )
-        if (entrypointUsable) envAssignments.push(`MULTICHAT_MODEL_OVERRIDE=${shellQuote(glmModel)}`)
+        if (entrypointUsable && altProviderModel) {
+          envAssignments.push(`MULTICHAT_MODEL_OVERRIDE=${shellQuote(altProviderModel)}`)
+        }
       }
       const envPrefix = envAssignments.length > 0 ? `${envAssignments.join(' ')} ` : ''
+      const modelFlag = altProviderModel ? ` --model ${shellQuote(altProviderModel)}` : ''
 
       innerCmd = entrypointUsable
         ? `${envPrefix}bash ${shellQuote(entrypointPath!)}`
-        : target === 'glm'
-          ? `${envPrefix}claude --resume ${shellQuote(topic.sessionId)} --model ${shellQuote(glmModel)} --permission-mode bypassPermissions`
+        : target === 'alt'
+          ? `${envPrefix}claude --resume ${shellQuote(topic.sessionId)}${modelFlag} --permission-mode bypassPermissions`
           : `claude --resume ${shellQuote(topic.sessionId)} --permission-mode bypassPermissions`
-    } else if (target === 'glm') {
+    } else if (target === 'alt') {
+      const modelFlag = altProviderModel ? ` --model ${shellQuote(altProviderModel)}` : ''
       innerCmd =
-        `ANTHROPIC_BASE_URL=${shellQuote('https://api.z.ai/api/anthropic')} `
-        + `ANTHROPIC_AUTH_TOKEN=${shellQuote(glmToken!)} `
-        + `claude --continue --model ${shellQuote(glmModel)}${channelFlag}`
+        `ANTHROPIC_BASE_URL=${shellQuote(altProviderBaseUrl!)} `
+        + `ANTHROPIC_AUTH_TOKEN=${shellQuote(altProviderToken!)} `
+        + `claude --continue${modelFlag}${channelFlag}`
     } else {
       innerCmd = `claude --continue${channelFlag}`
     }
@@ -465,7 +489,7 @@ export class ModelSwitch implements ModelSwitchLike {
     } catch (err) {
       // SECURITY: never surface err.message/err.cmd here — Node's execFile
       // embeds the full argv (including the quoted ANTHROPIC_AUTH_TOKEN for
-      // the glm branch) in both fields on a non-zero exit. Confirmed live
+      // the alt branch) in both fields on a non-zero exit. Confirmed live
       // 2026-07-27: a failed respawn-pane call returned the token in
       // cleartext via error.message. Log/report only the exit code/signal —
       // never the error text itself.

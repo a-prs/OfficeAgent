@@ -44,7 +44,6 @@ import {
   handleOobCommand,
   parseOobCommand,
   type OobContext,
-  type TmuxMirrorControl,
   type ModelSwitchControl,
 } from '../commands/oob.js'
 import {
@@ -144,12 +143,8 @@ export interface HandlerDeps {
   // AFTER OOB resolution and BEFORE gateAndNotify: OOB still wins, and
   // Claude still receives the channel notification regardless.
   watcher?: InboundWatcher
-  // TmuxMirror control surface, used by /mirror OOB command. Optional —
-  // when tmux_mirror.enabled=false at startup the mirror instance is
-  // never created and the OOB handler replies «disabled in config».
-  tmuxMirror?: TmuxMirrorControl
   // ModelSwitch control surface, used by /model OOB command. Optional —
-  // absent when model_switch.enabled=false, or when enabled but the
+  // absent when alt_provider.enabled=false, or when enabled but the
   // process isn't running inside tmux (pane-target resolution failed at
   // startup) — the OOB handler replies «not configured» either way.
   modelSwitch?: ModelSwitchControl
@@ -284,27 +279,13 @@ function maybeTriggerWatcher(ctx: Context, deps: HandlerDeps): void {
     })
 }
 
-// Fire-and-forget mirror bump. Triggered by an inbound message from an
-// allowed sender so the rolling tmux-mirror message is re-anchored at
-// the bottom of the chat (owner asked for this 2026-05-20: the mirror
-// was scrolling up out of view as the conversation progressed). Reuses
-// the same allowlist gate as the watcher so a non-allowed message never
-// disturbs the mirror. `bump` is optional on TmuxMirrorControl, so when
-// the wired mirror predates this method we silently skip.
-//
-// Bug #3 (TASK-4): use `isSideEffectAllowed` so a non-addressed group
-// message never re-anchors the mirror.
-function maybeBumpMirror(ctx: Context, deps: HandlerDeps): void {
-  if (!deps.tmuxMirror?.bump) return
-  if (!isSideEffectAllowed(ctx, deps.config, deps.policy)) return
-  const chatNum = ctx.chat?.id
-  if (chatNum === undefined) return
-  void deps.tmuxMirror.bump().catch((err) => {
-    deps.log.warn('tmux mirror bump error (ignored)', {
-      chat_id: String(chatNum),
-      error: err instanceof Error ? err.message : String(err),
-    })
-  })
+// No-op stub — the terminal mirror (tmux-mirror.ts) was cut entirely from
+// OfficeAgent (plan §0.1 category 1: dashboard/terminal-mirror-only code).
+// Kept as a stub rather than removing every call site below so the diff
+// against the upstream channel-plugin stays small and re-adding a mirror
+// later (if ever) doesn't require re-threading call sites by hand.
+function maybeBumpMirror(_ctx: Context, _deps: HandlerDeps): void {
+  // intentionally empty
 }
 
 // FIX-D M1 (2026-05-27): chat-type detection from a stringified Telegram
@@ -1126,9 +1107,9 @@ export async function handleInboundText(ctx: Context, deps: HandlerDeps): Promis
   //
   // Topic exception (2026-07-30, per Андрей's explicit ask — see
   // core/hot/handoff.md): only `/model` is exposed from inside a topic.
-  // Every other OOB command name (`/help`/`/status`/`/stop`/`/reset`/`/new`/
-  // `/mirror`) references MASTER-pane-only plumbing (ctx.statusManager,
-  // ctx.tmuxMirror control the master pane specifically) — those keep
+  // Every other OOB command name (`/help`/`/status`/`/stop`/`/reset`/`/new`)
+  // references MASTER-pane-only plumbing (ctx.statusManager controls the
+  // master pane specifically) — those keep
   // falling through to gateAndNotify unchanged, i.e. behave exactly as
   // today (forwarded as normal chat text to that topic's own Claude
   // session). Authorization for the topic case reuses the SAME trust tier
@@ -1181,7 +1162,6 @@ export async function handleInboundText(ctx: Context, deps: HandlerDeps): Promis
               },
             }
           : {}),
-        ...(deps.tmuxMirror ? { tmuxMirror: deps.tmuxMirror } : {}),
         ...(deps.modelSwitch ? { modelSwitch: deps.modelSwitch } : {}),
         ...(deps.modelSwitchStateFilePath ? { modelSwitchStateFilePath: deps.modelSwitchStateFilePath } : {}),
       }

@@ -8,7 +8,7 @@
 #
 # Matching semantics (PLAN.md section 7 / Open Q 2):
 #   * mcp_tools     — fnmatch glob against tool name (e.g.
-#                     "mcp__office2-gbrain-memory*").
+#                     "mcp__gbrain-memory*").
 #   * read_paths    — fnmatch glob against file_path / notebook_path
 #                     for Read/Edit/Write/NotebookEdit. ** treated as *
 #                     in fnmatch — sufficient for absolute paths in

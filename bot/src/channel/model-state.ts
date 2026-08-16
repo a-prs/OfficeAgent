@@ -10,7 +10,7 @@
 // plain `claude` on the next inbound message — TMUX_CHILD_ENV_ALLOWLIST
 // (tmux-session-pool.ts) carries no ANTHROPIC_* vars, so the respawned pane
 // is ALWAYS Claude regardless of what was selected before the kill. Without
-// resetting the entry on kill, this file would keep claiming "glm" for a
+// resetting the entry on kill, this file would keep claiming "alt" for a
 // pane that is actually back on Claude — status endpoints would lie, not
 // just go stale. MultichatRouter.onSessionKilled (wired in server.ts) calls
 // resetModelStateOnKill for exactly this reason.
@@ -84,6 +84,6 @@ export async function resetModelStateOnKill(
 ): Promise<void> {
   const state = await readStateFile(stateFilePath)
   if (!(paneTarget in state)) return
-  state[paneTarget] = { target: 'claude', updatedAt: Date.now() }
+  state[paneTarget] = { target: 'primary', updatedAt: Date.now() }
   await writeStateFile(stateFilePath, state, log)
 }

@@ -139,7 +139,7 @@ const TELEGRAM_TOKEN_PARTIAL_RE = /\b(\d{3})\d{7,}:(AA\w{2})\w+/g
 // HYPHEN EXEMPTION (2026-06-09): the character class is [A-Za-z0-9_] — a
 // HYPHEN now BREAKS the run instead of extending it. Every false positive
 // the owner hit was a kebab-case identifier: repo slugs
-// (`office2-plugin-claude-code`), feature-branch names, multichat link slugs.
+// (repo/package names), feature-branch names, multichat link slugs.
 // These are public, not secrets, and masking them ("validate only secrets")
 // produced dead links and noise. Opaque secrets that matter are caught by
 // the SPECIFIC prefix/shape rules above (bot tokens, gsk_/sk-/ghp_ prefixes,

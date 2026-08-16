@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Claude Code hooks that route stdin to the office2-channel plugin's
+# Install Claude Code hooks that route stdin to the officeagent-channel plugin's
 # webhook. Operator passes the per-agent settings.json explicitly — no
 # auto-discovery of ~/.claude/settings.json.
 #
@@ -8,7 +8,7 @@
 #     --settings /path/to/agent/settings.json \
 #     --chat-id 164795011 \
 #     --webhook-url http://127.0.0.1:8089/hooks/agent \
-#     [--agent-id office2-channel] \
+#     [--agent-id officeagent-channel] \
 #     [--permission-gate] [--gate-helper /abs/permission-gate-hook.ts] \
 #     [--policy-path /abs/permission-policy.yaml]
 #
@@ -21,7 +21,7 @@
 #   * The bearer token (TELEGRAM_WEBHOOK_TOKEN) is NEVER written to
 #     settings.json — operator exports it in the agent's runtime env.
 #   * Idempotent: re-running the same command replaces the previous entry
-#     rather than duplicating it (stable marker = "office2-channel-hook").
+#     rather than duplicating it (stable marker = "officeagent-channel-hook").
 
 set -euo pipefail
 

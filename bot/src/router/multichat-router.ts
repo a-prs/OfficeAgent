@@ -37,10 +37,8 @@ import type { Logger } from '../log.js'
 import {
   assertValidChatId,
   getChatPolicyOrDeny,
-  shouldMirrorTmuxForChat,
   type MultichatPolicy,
 } from '../chats/policy-loader.js'
-import { TmuxMirror } from '../status/tmux-mirror.js'
 import {
   confirmOutboxClaim,
   ensureChatStateDirs,
@@ -110,12 +108,12 @@ export interface RouterDeps {
   logger: Logger
   // model-switch (2026-07-30 per-topic extension): notified with the
   // chatId whenever the pool kills a session's tmux pane (idle watchdog OR
-  // explicit kill). A respawned pane always cold-boots plain `claude` with
-  // no GLM env (TMUX_CHILD_ENV_ALLOWLIST doesn't carry ANTHROPIC_* vars),
+  // explicit kill). A respawned pane always cold-boots the primary
+  // provider (TMUX_CHILD_ENV_ALLOWLIST doesn't carry ANTHROPIC_* vars),
   // so whatever model was selected before the kill no longer reflects
   // reality — without this hook the model-switch state file would keep
-  // claiming "glm" for a pane that is actually back on Claude. Optional so
-  // callers that don't wire model-switch aren't forced to pass a no-op.
+  // claiming "alt" for a pane that is actually back on primary. Optional
+  // so callers that don't wire model-switch aren't forced to pass a no-op.
   onSessionKilled?: (chatId: string) => void
 }
 
@@ -203,8 +201,6 @@ export class MultichatRouter {
   private readonly telegramApi: MultichatTelegramApi
   private readonly logger: Logger
   private readonly onSessionKilled: ((chatId: string) => void) | undefined
-  // MILESTONE_03: per-topic tmux mirrors, keyed by composite chat id.
-  private readonly mirrors = new Map<string, TmuxMirror>()
   // chatId -> outbox loop handle. Presence in the map means polling is
   // active; absence means we are not draining this chat's outbox yet.
   private readonly outboxLoops = new Map<string, OutboxLoopHandle>()
@@ -307,47 +303,20 @@ export class MultichatRouter {
    * deliberately NOT killed — they stay alive across plugin restarts so
    * the next start() reattaches without losing conversation context.
    */
-  // MILESTONE_03: start a per-topic tmux mirror once per composite chat,
-  // if the chat's policy opts in. Sync-insert into the Map BEFORE awaiting
-  // start() so a burst of inbound cannot spawn two mirrors for one chat.
-  private ensureMirror(chatId: string): void {
-    if (this.mirrors.has(chatId)) return
-    if (!shouldMirrorTmuxForChat(this.policy, chatId)) return
-    const mirror = new TmuxMirror({
-      api: this.telegramApi as unknown as TelegramApi,
-      log: this.logger,
-      chatId,
-      paneTarget: `multichat-${chatId}`,
-      socketName: 'default',
-      pollIntervalMs: 5000,
-      lineCount: 60,
-      maxLines: 50,
-      keypad: true,
-      policy: this.policy,
-    })
-    this.mirrors.set(chatId, mirror)
-    mirror.start().catch((err: unknown) => {
-      this.logger.warn('router.mirror.start_failed', {
-        chat_id: chatId,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    })
+  // No-op stubs — the per-topic terminal mirror (tmux-mirror.ts) was cut
+  // entirely from OfficeAgent (plan §0.1 category 1). Kept as stubs
+  // rather than removing every call site so the diff against the
+  // upstream channel-plugin stays small.
+  private ensureMirror(_chatId: string): void {
+    // intentionally empty
   }
 
-  private stopMirror(chatId: string): void {
-    const m = this.mirrors.get(chatId)
-    if (m === undefined) return
-    this.mirrors.delete(chatId)
-    Promise.resolve(m.stop()).catch(() => {})
+  private stopMirror(_chatId: string): void {
+    // intentionally empty
   }
 
-  // MILESTONE_03: re-anchor the rolling mirror below a freshly-arrived inbound
-  // message (matches the master mirror, handlers.ts deps.tmuxMirror.bump()).
-  // bump() self-debounces (BUMP_DEBOUNCE_MS) and is a no-op on an empty mirror.
-  private bumpMirror(chatId: string): void {
-    const m = this.mirrors.get(chatId)
-    if (m === undefined) return
-    Promise.resolve(m.bump()).catch(() => {})
+  private bumpMirror(_chatId: string): void {
+    // intentionally empty
   }
 
   async stop(): Promise<void> {
@@ -362,7 +331,6 @@ export class MultichatRouter {
     for (const chatId of Array.from(this.typingTimers.keys())) {
       this.stopTypingLoop(chatId)
     }
-    for (const cid of Array.from(this.mirrors.keys())) this.stopMirror(cid)
     this.pendingReplyTo.clear()
     this.pool.stopWatchdog()
     // FIX-E M3: clear any lingering dispatch chain heads. The values

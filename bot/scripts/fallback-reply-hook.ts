@@ -3,7 +3,7 @@
 //
 // feature/dm-fallback-reply-hook (2026-06-03). The owner's Telegram DM
 // (the main/launcher session) answers him through the
-// `mcp__office2-channel__reply` MCP tool — that send is what actually reaches
+// `mcp__officeagent-channel__reply` MCP tool — that send is what actually reaches
 // his chat; the session transcript never does. If a turn ends WITHOUT having
 // called reply()/edit_message(), the owner gets silence even though the
 // turn produced a final answer. This Stop hook closes that gap: on turn-end it
@@ -19,8 +19,8 @@
 // reused from read-receipt-hook.ts.
 //
 // Suppression invariants (no duplicate to the owner):
-//   * If the turn called mcp__office2-channel__reply OR
-//     mcp__office2-channel__edit_message → a reply already reached him → silent.
+//   * If the turn called mcp__officeagent-channel__reply OR
+//     mcp__officeagent-channel__edit_message → a reply already reached him → silent.
 //   * If the turn has no final assistant text (pure tool / pure thinking) →
 //     nothing to forward → silent.
 //   * If the turn was not answering a Telegram message (no `<channel
@@ -77,8 +77,8 @@ const TAIL_BYTES = 1024 * 1024
 // The two MCP tools that deliver a reply to the owner's Telegram. If either
 // was called this turn, the owner already saw the answer → no fallback.
 const REPLY_TOOL_NAMES = new Set<string>([
-  'mcp__office2-channel__reply',
-  'mcp__office2-channel__edit_message',
+  'mcp__officeagent-channel__reply',
+  'mcp__officeagent-channel__edit_message',
 ])
 
 const FETCH_TIMEOUT_MS = 5000

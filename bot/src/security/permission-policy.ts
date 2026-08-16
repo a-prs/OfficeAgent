@@ -47,7 +47,7 @@ export interface PermissionVerdict {
 
 /** One tier's matchers. All fields optional; absent = matches nothing. */
 export interface PolicyRules {
-  /** fnmatch globs against the tool name (e.g. "mcp__office2-gbrain-*"). */
+  /** fnmatch globs against the tool name (e.g. "mcp__gbrain-*"). */
   readonly tools?: readonly string[]
   /** fnmatch globs against file_path for Read/Edit/Write/NotebookEdit. */
   readonly read_paths?: readonly string[]

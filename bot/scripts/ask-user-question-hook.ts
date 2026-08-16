@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // ask-user-question-hook.ts — PreToolUse hook that intercepts the built-in
-// `AskUserQuestion` tool and routes the prompt through the office2-channel
+// `AskUserQuestion` tool and routes the prompt through the officeagent-channel
 // plugin so the owner can answer from Telegram instead of an in-terminal
 // menu.
 //
