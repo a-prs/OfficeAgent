@@ -116,6 +116,12 @@ if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
   ALT_PROVIDER_LABEL="${ALT_PROVIDER_LABEL:-Alternative model}"
 fi
 
+DEFAULT_MODEL_TARGET=""
+if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -n "$ALT_PROVIDER_TOKEN" ]; then
+  DEFAULT_MODEL_TARGET="alt"
+  log "No Anthropic credential given -- every session will default to the alternative provider ($ALT_PROVIDER_LABEL, no Anthropic account ever used)"
+fi
+
 # ---------------------------------------------------------------------
 # Step 5/7: generate config, install app trees
 # ---------------------------------------------------------------------
@@ -167,6 +173,7 @@ ALT_PROVIDER_BASE_URL=${ALT_PROVIDER_BASE_URL}
 ALT_PROVIDER_TOKEN=${ALT_PROVIDER_TOKEN}
 ALT_PROVIDER_MODEL=${ALT_PROVIDER_MODEL}
 ALT_PROVIDER_LABEL=${ALT_PROVIDER_LABEL}
+DEFAULT_MODEL_TARGET=${DEFAULT_MODEL_TARGET}
 EOF
 chmod 0600 "$CONFIG_ROOT/bot.env"
 
