@@ -38,7 +38,7 @@ if [[ -z "${CHAT_ID:-}" ]]; then
   exit 0
 fi
 
-WORKSPACE="${CLAUDE_WORKSPACE_DIR:-${HOME}/.claude-lab/agent-c/.claude}"
+WORKSPACE="${CLAUDE_WORKSPACE_DIR:-${HOME}/.claude}"
 POLICY_PATH="${WORKSPACE}/chats/policy.yaml"
 CHAT_ID_BASE="${CHAT_ID%%_t*}"
 PERSONA_PATH="${WORKSPACE}/chats/${CHAT_ID_BASE}/persona.md"

@@ -91,7 +91,7 @@ export type MultichatPolicy = z.infer<typeof MultichatPolicySchema>
  * for the default-derive case (workspace_dir → `<dir>/policy.yaml`).
  *
  * @param basePath directory containing `policy.yaml` (typically
- *   `~/.claude-lab/agent-c/.claude/chats`)
+ *   `<workspace_root>/.claude/chats`)
  * @returns validated, fully-typed multichat policy
  */
 export function loadPolicy(basePath: string): MultichatPolicy {

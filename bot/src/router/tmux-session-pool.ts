@@ -77,8 +77,8 @@ const SENSITIVE_ENV_VARS = [
 //   PATH    — required to locate python3 (hooks) and the claude binary
 //             if it was not pre-resolved by server.ts (H8). Without
 //             PATH the child shell cannot start anything.
-//   HOME    — claude reads ~/.claude/*, ~/.claude-lab/*, ssh keys, etc.
-//             Hooks resolve workspace via ${HOME}/.claude-lab/... when
+//   HOME    — claude reads ~/.claude/*, <workspace_root>/*, ssh keys, etc.
+//             Hooks resolve workspace via ${HOME}/officeagent-workspace/... when
 //             CLAUDE_WORKSPACE_DIR is unset; HOME is the canonical
 //             fallback root for user data.
 //   USER    — some tools (git, ssh) read $USER instead of getlogin().
@@ -243,7 +243,7 @@ export interface TmuxSessionPoolOptions {
   stateDir: string
   // Workspace root used for persona-relative path resolution by hooks
   // and as the canonical CLAUDE_WORKSPACE_DIR exported into the tmux
-  // session. Typically `~/.claude-lab/agent-c/.claude`.
+  // session. Typically the per-topic workspace root under /data/workspaces (see docker-compose.yml).
   workspaceDir: string
   // Working directory for the spawned claude process. When provided,
   // tmux runs `new-session -c {chatsBasePath}` so that claude picks up

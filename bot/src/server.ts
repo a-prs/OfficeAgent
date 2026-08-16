@@ -296,8 +296,8 @@ try {
 //   1. explicit config.multichat.workspace_dir
 //   2. $CLAUDE_WORKSPACE_DIR env (set by the plugin shim on Mac mini)
 //   3. parent of cwd — for the canonical layout
-//      `~/.claude-lab/agent-c/.claude/jarvis-channel/plugin`,
-//      this resolves to `~/.claude-lab/agent-c/.claude`
+//      `<workspace_root>/.claude/<plugin-dir>/plugin`,
+//      this resolves to `<workspace_root>/.claude`
 //
 // Resolution order for the policy file path (FIX-G / M3, Codex review
 // 2026-05-27 #4 — the env var name `_POLICY_PATH` was being treated as

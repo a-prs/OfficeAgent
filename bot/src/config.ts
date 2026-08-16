@@ -277,6 +277,17 @@ export const RuntimeEnvSchema = z.object({
   TELEGRAM_STATUS_INTERVAL_MS: z.coerce.number().int().positive().optional(),
   TELEGRAM_ALBUM_FLUSH_MS: z.coerce.number().int().positive().optional(),
   GROQ_API_KEY: z.string().optional(),
+  // Added for OfficeAgent's docker-compose topology: the standalone
+  // channel-plugin always toggled webhook.enabled via config.json (no env
+  // var existed for it). The container image ships no config.json by
+  // default, and the loopback webhook server (/health, /hooks/agent,
+  // /hooks/permission/*, /hooks/model/*, /hooks/ask-user-question/*) is
+  // load-bearing for permission-gate, ask-user-question, model-switch and
+  // swarm delivery, not optional — so it needs an env toggle too.
+  TELEGRAM_WEBHOOK_ENABLED: z
+    .string()
+    .transform((v) => /^(1|true|yes|on)$/i.test(v))
+    .optional(),
   TELEGRAM_WEBHOOK_HOST: z.string().optional(),
   TELEGRAM_WEBHOOK_PORT: z.coerce.number().int().min(0).optional(),
   TELEGRAM_WEBHOOK_TOKEN: z.string().optional(),
@@ -455,6 +466,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   if (Object.keys(album).length > 0) merged.album = album
 
   const webhook = (merged.webhook && typeof merged.webhook === 'object' ? merged.webhook : {}) as Record<string, unknown>
+  if (parsedEnv.TELEGRAM_WEBHOOK_ENABLED !== undefined) webhook.enabled = parsedEnv.TELEGRAM_WEBHOOK_ENABLED
   if (parsedEnv.TELEGRAM_WEBHOOK_HOST !== undefined) webhook.host = parsedEnv.TELEGRAM_WEBHOOK_HOST
   if (parsedEnv.TELEGRAM_WEBHOOK_PORT !== undefined) webhook.port = parsedEnv.TELEGRAM_WEBHOOK_PORT
   if (Object.keys(webhook).length > 0) merged.webhook = webhook

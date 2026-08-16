@@ -19,7 +19,7 @@ import type { MultichatPolicy } from './policy-loader.ts'
  *
  * @param chatId stringified Telegram chat id (negative for groups)
  * @param chatsBasePath directory containing per-chat subfolders,
- *   typically `~/.claude-lab/agent-c/.claude/chats`
+ *   typically `<workspace_root>/.claude/chats`
  * @returns persona markdown contents as a UTF-8 string
  * @throws Error when persona.md is absent or unreadable
  */
