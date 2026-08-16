@@ -14,7 +14,7 @@
 // CLI:
 //   bun scripts/patch-claude-settings.ts \
 //     --settings /path/to/settings.json \
-//     --chat-id 164795011 \
+//     --chat-id <your-telegram-user-id> \
 //     --webhook-url http://127.0.0.1:8089/hooks/agent \
 //     [--agent-id officeagent-channel] \
 //     [--helper /abs/path/to/post-hook.ts]
