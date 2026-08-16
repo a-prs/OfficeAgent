@@ -28,6 +28,7 @@ __pycache__/
 dist/
 out/
 .bun/
+bun/
 
 # мусор macOS/резервные копии
 .DS_Store
