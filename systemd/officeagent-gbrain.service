@@ -1,0 +1,30 @@
+[Unit]
+Description=OfficeAgent gbrain (memory+recall+swarm+task MCP, one process)
+After=officeagent-db.service network-online.target
+Wants=network-online.target
+BindsTo=officeagent-db.service
+
+[Service]
+Type=simple
+User=officeagent
+Group=officeagent
+WorkingDirectory=/opt/officeagent/gbrain
+EnvironmentFile=/etc/officeagent/officeagent.env
+EnvironmentFile=/etc/officeagent/gbrain.env
+ExecStart=/opt/officeagent/gbrain/.venv/bin/python -m services.server
+Restart=always
+RestartSec=5
+
+# Host-process hardening (no container isolation here, so this carries
+# more weight than it would in docker-compose's cap_drop/no-new-privileges
+# equivalent). Not a substitute for real per-topic isolation (there isn't
+# any — plan §0.7: single owner per install) but keeps the process from
+# touching anything outside its own tree.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/officeagent/gbrain/.model-cache /var/lib/officeagent/vault
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

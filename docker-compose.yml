@@ -1,0 +1,46 @@
+name: officeagent
+
+# Only Postgres runs in Docker. `bot/` and `gbrain/` run directly on the
+# host under systemd (see systemd/*.service and INSTALL.md/install.sh) —
+# a full docker-compose stack (bot + gbrain + db, each its own container)
+# was the original draft of this file, but the owner correctly pointed
+# out that's needless overhead on a cheap VPS, and that our own real
+# production system (and the comparable edgelab-install competitor) both
+# run the actual agent process straight on the host via systemd, with
+# Docker reserved for the one piece that genuinely benefits from a
+# pinned, reproducible image: Postgres+pgvector. This file was rewritten
+# to match that after the first pass already existed — see the
+# implementation notes in the top-level README for what changed and why.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: officeagent-db
+    restart: unless-stopped
+    # No published ports: bot/gbrain reach Postgres over the docker0
+    # bridge's default port-mapping instead (127.0.0.1:5432 on the host),
+    # published deliberately here (unlike the bot/gbrain services in the
+    # earlier draft) because bot/gbrain are now HOST processes, not
+    # containers on a shared compose network, and need a real host-visible
+    # port to connect to.
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${PG_DATABASE}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DATABASE}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:

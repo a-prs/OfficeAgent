@@ -1,0 +1,21 @@
+[Unit]
+Description=OfficeAgent Postgres+pgvector (docker compose, single service)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/officeagent
+EnvironmentFile=/etc/officeagent/officeagent.env
+# Foreground `up` (no -d) so systemd owns the container's lifecycle and
+# restart policy directly, same pattern as the bot/gbrain units below —
+# one supervisor (systemd) for the whole stack, not two (systemd +
+# docker's own --restart policy) fighting each other.
+ExecStart=/usr/bin/docker compose -f /opt/officeagent/docker-compose.yml up db
+ExecStop=/usr/bin/docker compose -f /opt/officeagent/docker-compose.yml stop db
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

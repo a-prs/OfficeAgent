@@ -1,0 +1,28 @@
+[Unit]
+Description=OfficeAgent bot (Telegram router + tmux-hosted claude sessions)
+After=officeagent-gbrain.service network-online.target
+Wants=network-online.target
+BindsTo=officeagent-gbrain.service
+
+[Service]
+Type=simple
+User=officeagent
+Group=officeagent
+WorkingDirectory=/opt/officeagent/bot
+EnvironmentFile=/etc/officeagent/officeagent.env
+EnvironmentFile=/etc/officeagent/bot.env
+ExecStart=/usr/bin/bun run src/server.ts
+Restart=always
+RestartSec=5
+
+# NOT sandboxed as tightly as gbrain: this process spawns tmux panes
+# running the `claude` CLI, which itself needs to read/write the owner's
+# per-topic workspaces under /data or /opt/officeagent/workspaces and
+# $HOME/.claude — a strict ProtectSystem=strict here would break Claude
+# Code's own state directory. ProtectHome/PrivateTmp are still safe.
+NoNewPrivileges=true
+ProtectHome=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
