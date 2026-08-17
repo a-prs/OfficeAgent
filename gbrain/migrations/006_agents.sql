@@ -32,4 +32,4 @@ CREATE INDEX IF NOT EXISTS idx_agents_last_seen
 
 -- Grants ------------------------------------------------------------------
 
-GRANT ALL PRIVILEGES ON TABLE agents TO gbrain;
+GRANT ALL PRIVILEGES ON TABLE agents TO CURRENT_USER;

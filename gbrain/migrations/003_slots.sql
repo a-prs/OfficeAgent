@@ -38,5 +38,5 @@ CREATE INDEX IF NOT EXISTS idx_slots_agent_pinned_label
 CREATE INDEX IF NOT EXISTS idx_slots_agent_updated
     ON slots(agent, updated_at DESC);
 
-GRANT ALL PRIVILEGES ON TABLE slots TO gbrain;
-GRANT ALL PRIVILEGES ON SEQUENCE slots_id_seq TO gbrain;
+GRANT ALL PRIVILEGES ON TABLE slots TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON SEQUENCE slots_id_seq TO CURRENT_USER;

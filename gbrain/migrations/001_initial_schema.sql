@@ -110,13 +110,20 @@ CREATE TABLE IF NOT EXISTS delivery_outbox (
 );
 
 -- Grants --------------------------------------------------------------------
--- The `gbrain` service role gets full CRUD on tables + sequences. The role
--- must already exist (install.sh handles creation).
+-- Granted to CURRENT_USER (the role migrate.py connects as, i.e. PG_USER
+-- from officeagent.env) rather than a hardcoded role name: this migration
+-- was ported from a deployment where a fixed `gbrain` service role existed
+-- separately from whichever role ran migrations, but OfficeAgent's installer
+-- only ever creates one Postgres role (PG_USER, default `officeagent`) that
+-- both owns the schema and is what the app connects as -- CURRENT_USER
+-- already owns everything it just created, so this is mostly redundant
+-- belt-and-suspenders, but keeps the grant explicit and correct regardless
+-- of what PG_USER is actually named.
 
-GRANT USAGE ON SCHEMA public TO gbrain;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO gbrain;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO gbrain;
+GRANT USAGE ON SCHEMA public TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO CURRENT_USER;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON TABLES TO gbrain;
+    GRANT ALL PRIVILEGES ON TABLES TO CURRENT_USER;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT ALL PRIVILEGES ON SEQUENCES TO gbrain;
+    GRANT ALL PRIVILEGES ON SEQUENCES TO CURRENT_USER;

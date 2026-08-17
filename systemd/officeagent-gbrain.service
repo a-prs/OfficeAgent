@@ -11,6 +11,16 @@ Group=officeagent
 WorkingDirectory=/opt/officeagent/gbrain
 EnvironmentFile=/etc/officeagent/officeagent.env
 EnvironmentFile=/etc/officeagent/gbrain.env
+# ProtectHome=true below makes /home (and /root, /run/user) inaccessible
+# to this process -- including officeagent's OWN home directory. Without
+# an explicit override, systemd still sets $HOME from the officeagent
+# passwd entry (/home/officeagent), so any code path that expands ~ (e.g.
+# asyncpg checking for a default ~/.postgresql/postgresql.key before
+# connecting) hits a hard PermissionError instead of a clean "not found" --
+# found by actually running this unit, not by reading the code. Point HOME
+# at the working directory instead, which is real and already accessible.
+Environment=HOME=/opt/officeagent/gbrain
+
 ExecStart=/opt/officeagent/gbrain/.venv/bin/python -m services.server
 Restart=always
 RestartSec=5

@@ -71,7 +71,7 @@ CREATE TRIGGER tasks_touch
 
 -- Grants ------------------------------------------------------------------
 
-GRANT ALL PRIVILEGES ON TABLE tasks TO gbrain;
-GRANT ALL PRIVILEGES ON SEQUENCE tasks_id_seq TO gbrain;
-GRANT ALL PRIVILEGES ON TABLE task_history TO gbrain;
-GRANT ALL PRIVILEGES ON SEQUENCE task_history_id_seq TO gbrain;
+GRANT ALL PRIVILEGES ON TABLE tasks TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON SEQUENCE tasks_id_seq TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON TABLE task_history TO CURRENT_USER;
+GRANT ALL PRIVILEGES ON SEQUENCE task_history_id_seq TO CURRENT_USER;
