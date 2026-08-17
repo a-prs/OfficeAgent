@@ -49,6 +49,14 @@ shift
 # Optional (hook bookkeeping, set when policy-loader / persona pipeline
 # wants them; absent in MVP):
 #   POLICY_PATH, PERSONA_PATH
+# Optional (GLM/Z.ai-primary deployments, 2026-08-17): DEFAULT_MODEL_TARGET,
+# ALT_PROVIDER_BASE_URL, ALT_PROVIDER_TOKEN, ALT_PROVIDER_MODEL. Found the
+# hard way: buildSanitizedTmuxEnv() in tmux-session-pool.ts already carves
+# these out and passes them to tmux via `-e`, and multichat-entrypoint.sh
+# already reads DEFAULT_MODEL_TARGET to build --model/ANTHROPIC_BASE_URL --
+# but this wrapper's `env -i` wipe dropped them before the exec below ever
+# ran, silently reducing every topic/group spawn to a bare, flagless
+# `claude` that tries real Anthropic auth on a GLM-only box and hangs.
 #
 # FIX (2026-05-28): forward TMUX and TMUX_PANE through the env -i wipe.
 # tmux sets these on the new-session command's environment (verified:
@@ -99,4 +107,8 @@ exec env -i \
   PERSONA_PATH="${PERSONA_PATH:-}" \
   CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
   GBRAIN_BEARER="${GBRAIN_BEARER:-}" \
+  DEFAULT_MODEL_TARGET="${DEFAULT_MODEL_TARGET:-}" \
+  ALT_PROVIDER_BASE_URL="${ALT_PROVIDER_BASE_URL:-}" \
+  ALT_PROVIDER_TOKEN="${ALT_PROVIDER_TOKEN:-}" \
+  ALT_PROVIDER_MODEL="${ALT_PROVIDER_MODEL:-}" \
   "$CLAUDE_BIN" "$@"

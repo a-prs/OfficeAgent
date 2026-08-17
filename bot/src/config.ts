@@ -287,6 +287,16 @@ export const RuntimeEnvSchema = z.object({
   // chat_not_allowed silently drops every inbound DM.
   TELEGRAM_ALLOWED_CHAT_IDS: z.string().optional(),
   TELEGRAM_WORKSPACE_ROOT: z.string().optional(),
+  // No env override previously existed for status.enabled -- config.json-only,
+  // and install.sh never writes a config.json, so a fresh install has zero
+  // "is the bot alive" signal on the DM path (the master session's own
+  // sendChatAction typing pulse lives inside StatusManager, gated on this
+  // flag; the router/group path has its own independent typing pulse and is
+  // unaffected). Same truthy convention as the other *_ENABLED flags.
+  TELEGRAM_STATUS_ENABLED: z
+    .string()
+    .transform((v) => /^(1|true|yes|on)$/i.test(v))
+    .optional(),
   TELEGRAM_STATUS_INTERVAL_MS: z.coerce.number().int().positive().optional(),
   TELEGRAM_ALBUM_FLUSH_MS: z.coerce.number().int().positive().optional(),
   GROQ_API_KEY: z.string().optional(),
@@ -483,6 +493,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   // Nested overrides: status.interval_ms, album.flush_ms, webhook.{host,port}
   const status = (merged.status && typeof merged.status === 'object' ? merged.status : {}) as Record<string, unknown>
+  if (parsedEnv.TELEGRAM_STATUS_ENABLED !== undefined) {
+    status.enabled = parsedEnv.TELEGRAM_STATUS_ENABLED
+  }
   if (parsedEnv.TELEGRAM_STATUS_INTERVAL_MS !== undefined) {
     status.interval_ms = parsedEnv.TELEGRAM_STATUS_INTERVAL_MS
   }
