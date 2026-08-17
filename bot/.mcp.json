@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "officeagent-channel": {
+      "command": "bun",
+      "args": [
+        "./src/server.ts"
+      ]
+    },
+    "gbrain-memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8770/memory/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OFFICEAGENT_OWNER_TOKEN}"
+      }
+    },
+    "gbrain-recall": {
+      "type": "http",
+      "url": "http://127.0.0.1:8770/recall/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OFFICEAGENT_OWNER_TOKEN}"
+      }
+    },
+    "gbrain-swarm": {
+      "type": "http",
+      "url": "http://127.0.0.1:8770/swarm/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OFFICEAGENT_OWNER_TOKEN}"
+      }
+    },
+    "gbrain-task": {
+      "type": "http",
+      "url": "http://127.0.0.1:8770/task/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OFFICEAGENT_OWNER_TOKEN}"
+      }
+    }
+  }
+}

@@ -254,6 +254,19 @@ export const AppConfigSchema = z.object({
     timeout_ms: z.number().int().positive().default(600_000),
     allowed_user_ids: z.array(z.number().int().positive()).optional(),
   }).default({}),
+  // Master-pane delivery (2026-08-16) — see channel/pane-inject.ts for the
+  // full "why": the MCP `notifications/claude/channel` push
+  // (channel/notify.ts) requires an undocumented, Anthropic-account-gated
+  // GrowthBook flag that a GLM/Z.ai-only install never gets, so it silently
+  // no-ops there. `target`/`server_name` MUST match the tmux session name
+  // and .mcp.json key officeagent-bot.service launches the master session
+  // under (systemd/officeagent-bot.service) — a mismatch here means DM
+  // delivery fails the same way, just with a different root cause.
+  master_pane: z.object({
+    target: z.string().default('officeagent-bot'),
+    server_name: z.string().default('officeagent-channel'),
+    socket_name: z.string().optional(),
+  }).default({}),
 })
 export type AppConfig = z.infer<typeof AppConfigSchema>
 
@@ -336,6 +349,22 @@ export const RuntimeEnvSchema = z.object({
   TELEGRAM_ASK_USER_QUESTION_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   TELEGRAM_ASK_USER_QUESTION_ALLOWED_USER_IDS: z.string().optional(), // CSV
   TELEGRAM_ASK_USER_QUESTION_MAX_PREVIEW_CHARS: z.coerce.number().int().positive().optional(),
+  // Master-pane delivery (2026-08-16, see channel/pane-inject.ts). MUST
+  // match the tmux session name / .mcp.json key officeagent-bot.service
+  // launches the master session under.
+  TELEGRAM_MASTER_PANE_TARGET: z.string().optional(),
+  TELEGRAM_MASTER_PANE_SERVER_NAME: z.string().optional(),
+  TELEGRAM_MASTER_PANE_SOCKET_NAME: z.string().optional(),
+  // Permission gate (2026-08-16): no env override previously existed for
+  // this — config.json-only. install.sh has no config.json step, so a
+  // fresh install could register the gate hook (install-hooks.sh
+  // --permission-gate) but never flip the config that makes it actually
+  // relay instead of 503-and-fail-closed. Same truthy convention as the
+  // other *_ENABLED flags above.
+  TELEGRAM_PERMISSION_GATE_ENABLED: z
+    .string()
+    .transform((v) => /^(1|true|yes|on)$/i.test(v))
+    .optional(),
 })
 export type RuntimeEnv = z.infer<typeof RuntimeEnvSchema>
 
@@ -509,6 +538,30 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     askUserQuestion.max_preview_chars = parsedEnv.TELEGRAM_ASK_USER_QUESTION_MAX_PREVIEW_CHARS
   }
   if (Object.keys(askUserQuestion).length > 0) merged.ask_user_question = askUserQuestion
+
+  // Master-pane env overrides (2026-08-16). Same layering pattern as the
+  // blocks above.
+  const masterPane = (merged.master_pane && typeof merged.master_pane === 'object'
+    ? merged.master_pane
+    : {}) as Record<string, unknown>
+  if (parsedEnv.TELEGRAM_MASTER_PANE_TARGET !== undefined) {
+    masterPane.target = parsedEnv.TELEGRAM_MASTER_PANE_TARGET
+  }
+  if (parsedEnv.TELEGRAM_MASTER_PANE_SERVER_NAME !== undefined) {
+    masterPane.server_name = parsedEnv.TELEGRAM_MASTER_PANE_SERVER_NAME
+  }
+  if (parsedEnv.TELEGRAM_MASTER_PANE_SOCKET_NAME !== undefined) {
+    masterPane.socket_name = parsedEnv.TELEGRAM_MASTER_PANE_SOCKET_NAME
+  }
+  if (Object.keys(masterPane).length > 0) merged.master_pane = masterPane
+
+  const permissionGate = (merged.permission_gate && typeof merged.permission_gate === 'object'
+    ? merged.permission_gate
+    : {}) as Record<string, unknown>
+  if (parsedEnv.TELEGRAM_PERMISSION_GATE_ENABLED !== undefined) {
+    permissionGate.enabled = parsedEnv.TELEGRAM_PERMISSION_GATE_ENABLED
+  }
+  if (Object.keys(permissionGate).length > 0) merged.permission_gate = permissionGate
 
   try {
     return AppConfigSchema.parse(merged)

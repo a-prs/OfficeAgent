@@ -59,7 +59,7 @@ fi
 step "2/7 system packages (Node 20, Python 3.11+, git, docker)"
 apt-get update -y
 apt-get install -y --no-install-recommends \
-  ca-certificates curl git gnupg tmux python3 python3-venv python3-pip rsync openssl
+  ca-certificates curl git gnupg tmux python3 python3-venv python3-pip rsync openssl unzip
 
 if ! command -v node >/dev/null 2>&1 || [ "$(node -v | sed 's/^v//;s/\..*//')" -lt 20 ]; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -68,7 +68,12 @@ fi
 
 if ! command -v bun >/dev/null 2>&1; then
   curl -fsSL https://bun.sh/install | bash
-  ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
+  # Copy (not symlink) the binary out to /usr/local/bin: the installer
+  # runs as root, so bun lands under $HOME/.bun (i.e. /root/.bun) --
+  # a symlink there is unreachable for the unprivileged `officeagent`
+  # user later (root's home is 0700), so `runuser -u officeagent -- bun`
+  # fails with "Permission denied" even though the symlink itself resolves.
+  install -m 0755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
 fi
 
 if ! command -v claude >/dev/null 2>&1; then
@@ -93,6 +98,49 @@ else
   log "system user 'officeagent' already exists"
 fi
 
+# Seed ~/.claude.json so claude's first-ever launch in $INSTALL_ROOT/bot never
+# hits the interactive "Is this a project you created or one you trust?"
+# dialog (found the hard way testing a from-scratch install: the blind
+# ExecStartPost keystrokes are timed for the OLDER dev-channels warning, not
+# this dialog, and dismiss it wrong often enough that the service sits there
+# doing nothing until a human notices). Only written if it doesn't exist yet
+# -- never overwrite a real config on a re-run.
+if [ ! -f /home/officeagent/.claude.json ]; then
+  cat > /home/officeagent/.claude.json <<EOF
+{
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "$INSTALL_ROOT/bot": {
+      "hasTrustDialogAccepted": true,
+      "hasCompletedProjectOnboarding": true,
+      "projectOnboardingSeenCount": 1
+    }
+  }
+}
+EOF
+  chown officeagent:officeagent /home/officeagent/.claude.json
+  chmod 0600 /home/officeagent/.claude.json
+fi
+
+# Seed user-level settings so `--permission-mode bypassPermissions` never
+# hits its own one-time interactive confirmation ("WARNING: Claude Code
+# running in Bypass Permissions mode ... 1. No, exit / 2. Yes, I accept").
+# Found the hard way: ExecStartPost's blind Enter keystrokes select the
+# highlighted DEFAULT option, which is "1. No, exit" -- claude exits
+# immediately, tmux (single pane, no remain-on-exit) closes with it, and
+# the service crash-loops forever with no visible reason in `journalctl`
+# (the real error only lives in the tmux pane, which is already gone by
+# the time anyone looks). The accept path in claude's own source writes
+# exactly this key to user-scope settings -- write it up front instead of
+# fighting the dialog with more keystrokes.
+mkdir -p /home/officeagent/.claude
+if [ ! -f /home/officeagent/.claude/settings.json ]; then
+  printf '{\n  "skipDangerousModePermissionPrompt": true\n}\n' > /home/officeagent/.claude/settings.json
+  chown officeagent:officeagent /home/officeagent/.claude/settings.json
+  chmod 0600 /home/officeagent/.claude/settings.json
+fi
+chown officeagent:officeagent /home/officeagent/.claude
+
 # ---------------------------------------------------------------------
 # Step 4/7: five questions
 # ---------------------------------------------------------------------
@@ -106,14 +154,20 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
 fi
 read -rp "Full-text search language [russian/english/simple] (default english): " FTS_LANGUAGE
 FTS_LANGUAGE="${FTS_LANGUAGE:-english}"
-read -rp "Alternative model provider (GLM/Z.ai or similar)? [y/N]: " WANT_ALT
-ALT_PROVIDER_BASE_URL="" ; ALT_PROVIDER_TOKEN="" ; ALT_PROVIDER_MODEL="" ; ALT_PROVIDER_LABEL="Alternative model"
+read -rp "Also connect GLM (Z.ai) as an alternative model? [y/N]: " WANT_ALT
+ALT_PROVIDER_BASE_URL="" ; ALT_PROVIDER_TOKEN="" ; ALT_PROVIDER_MODEL="" ; ALT_PROVIDER_LABEL=""
 if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
-  read -rp "  ALT_PROVIDER_BASE_URL: " ALT_PROVIDER_BASE_URL
-  read -rp "  ALT_PROVIDER_TOKEN: " ALT_PROVIDER_TOKEN
-  read -rp "  ALT_PROVIDER_MODEL: " ALT_PROVIDER_MODEL
-  read -rp "  ALT_PROVIDER_LABEL (display name, default 'Alternative model'): " ALT_PROVIDER_LABEL
-  ALT_PROVIDER_LABEL="${ALT_PROVIDER_LABEL:-Alternative model}"
+  # Only the token is asked -- base_url/model/label are GLM's own fixed,
+  # known-good values (2026-08-16, owner: don't make the installer ask
+  # things a non-technical person can't answer). Someone who genuinely
+  # wants a DIFFERENT Anthropic-compatible provider (not GLM) can still
+  # override ALT_PROVIDER_BASE_URL/MODEL/LABEL by hand afterward in
+  # /etc/officeagent/bot.env -- that is a power-user path, not the
+  # installer's default flow.
+  read -rp "  GLM (Z.ai) API token: " ALT_PROVIDER_TOKEN
+  ALT_PROVIDER_BASE_URL="https://api.z.ai/api/anthropic"
+  ALT_PROVIDER_MODEL="glm-5.2"
+  ALT_PROVIDER_LABEL="GLM 5.2 (Z.ai)"
 fi
 
 DEFAULT_MODEL_TARGET=""
@@ -127,9 +181,30 @@ fi
 # ---------------------------------------------------------------------
 step "5/7 writing config + installing app trees"
 mkdir -p "$CONFIG_ROOT" "$VAULT_ROOT" "$WORKSPACES_ROOT" "$INSTALL_ROOT"
-PG_PASSWORD="$(openssl rand -hex 24)"
-TELEGRAM_WEBHOOK_TOKEN="$(openssl rand -hex 32)"
-OFFICEAGENT_OWNER_TOKEN="$(openssl rand -hex 32)"
+
+# Reuse already-generated secrets on a re-run instead of blindly generating
+# fresh ones every time: Postgres only honours POSTGRES_PASSWORD on first
+# init of an empty data directory, so regenerating PG_PASSWORD on a second
+# run (retrying after a failure, or a future --upgrade) silently desyncs
+# the config from the already-initialized DB role -- auth then fails with
+# no indication why. Same idea for the two webhook/owner tokens: nothing
+# forces them to rotate on a re-run, and rotating them invalidates any
+# already-issued in-flight state for no reason.
+reuse_or_generate() {
+  # $1 = existing env file to check, $2 = var name, $3 = openssl arg for a fresh value
+  local file="$1" var="$2" bits="$3" existing
+  if [ -f "$file" ]; then
+    existing="$(grep -m1 "^${var}=" "$file" | cut -d= -f2-)"
+    if [ -n "$existing" ]; then
+      printf '%s' "$existing"
+      return
+    fi
+  fi
+  openssl rand -hex "$bits"
+}
+PG_PASSWORD="$(reuse_or_generate "$CONFIG_ROOT/officeagent.env" PG_PASSWORD 24)"
+TELEGRAM_WEBHOOK_TOKEN="$(reuse_or_generate "$CONFIG_ROOT/bot.env" TELEGRAM_WEBHOOK_TOKEN 32)"
+OFFICEAGENT_OWNER_TOKEN="$(reuse_or_generate "$CONFIG_ROOT/bot.env" OFFICEAGENT_OWNER_TOKEN 32)"
 
 cat > "$CONFIG_ROOT/officeagent.env" <<EOF
 PG_DATABASE=officeagent
@@ -156,8 +231,16 @@ HF_HOME=${INSTALL_ROOT}/gbrain/.model-cache
 EOF
 chmod 0600 "$CONFIG_ROOT/gbrain.env"
 
+# A bot token is always "<numeric bot id>:<rest>" -- the config schema
+# requires bot_id (via TELEGRAM_EXPECTED_BOT_ID) as a separate field rather
+# than parsing it out of the token itself at runtime, so extract it here
+# instead of asking a 6th interactive question for a value the token
+# already contains.
+TELEGRAM_EXPECTED_BOT_ID="${TELEGRAM_BOT_TOKEN%%:*}"
+
 cat > "$CONFIG_ROOT/bot.env" <<EOF
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+TELEGRAM_EXPECTED_BOT_ID=${TELEGRAM_EXPECTED_BOT_ID}
 TELEGRAM_ALLOWED_USER_IDS=${OWNER_TELEGRAM_USER_ID}
 TELEGRAM_ALLOWED_CHAT_IDS=${OWNER_TELEGRAM_USER_ID}
 TELEGRAM_WEBHOOK_ENABLED=1
@@ -174,11 +257,57 @@ ALT_PROVIDER_TOKEN=${ALT_PROVIDER_TOKEN}
 ALT_PROVIDER_MODEL=${ALT_PROVIDER_MODEL}
 ALT_PROVIDER_LABEL=${ALT_PROVIDER_LABEL}
 DEFAULT_MODEL_TARGET=${DEFAULT_MODEL_TARGET}
+TELEGRAM_MULTICHAT_ENABLED=1
+TELEGRAM_MULTICHAT_WORKSPACE_DIR=${WORKSPACES_ROOT}
+TELEGRAM_MASTER_PANE_TARGET=officeagent-bot
+TELEGRAM_MASTER_PANE_SERVER_NAME=officeagent-channel
+TELEGRAM_PERMISSION_GATE_ENABLED=1
 EOF
 chmod 0600 "$CONFIG_ROOT/bot.env"
 
+# Multichat bootstrap: policy.yaml (every chat_id the router will accept
+# MUST have an explicit entry -- no wildcard fallback, unlisted chats are
+# denied) + the owner's own DM chat_id as the one pre-registered chat, so
+# a fresh install can be messaged directly with no supergroup/topics setup
+# required first. New forum-topic chat_ids are NOT auto-provisioned here
+# (that's dynamic per-topic provisioning, still a TODO -- see README
+# "Status") -- for now, adding a topic means adding its chat_id
+# (`<supergroup_id>_t<thread_id>`) as a second entry in this same file by
+# hand and restarting officeagent-bot.
+mkdir -p "$WORKSPACES_ROOT/chats" "$WORKSPACES_ROOT/chats/${OWNER_TELEGRAM_USER_ID}"
+cat > "$WORKSPACES_ROOT/chats/policy.yaml" <<EOF
+version: 1
+allowlist:
+  chats: ["${OWNER_TELEGRAM_USER_ID}"]
+  users: ["${OWNER_TELEGRAM_USER_ID}"]
+mention_allowlist: []
+chats:
+  "${OWNER_TELEGRAM_USER_ID}":
+    mode: private
+    streaming: off
+    edit_message_progress: false
+    delivery: final_only
+    persona_file: persona.md
+    handoff_file: handoff.md
+    system_reminder: ""
+    respond_to_all: true
+    topics_only: false
+EOF
+cat > "$WORKSPACES_ROOT/chats/${OWNER_TELEGRAM_USER_ID}/persona.md" <<'EOF'
+# OfficeAgent
+
+You are OfficeAgent, a Telegram-based assistant running on the owner's own
+server. Reply in whatever language the owner writes to you in. You have
+Bash/Read/Write/Edit tools scoped to your own workspace, and MCP tools for
+persistent memory (gbrain-memory / gbrain-recall) -- use `remember`-style
+tools when the owner tells you something worth keeping across sessions, and
+recall before assuming you don't already know something.
+EOF
+touch "$WORKSPACES_ROOT/chats/${OWNER_TELEGRAM_USER_ID}/handoff.md"
+chown -R officeagent:officeagent "$WORKSPACES_ROOT"
+
 rsync -a --delete "$REPO_ROOT/gbrain/" "$INSTALL_ROOT/gbrain/" --exclude .venv --exclude __pycache__
-rsync -a --delete "$REPO_ROOT/bot/" "$INSTALL_ROOT/bot/" --exclude node_modules --exclude state
+rsync -a --delete "$REPO_ROOT/bot/" "$INSTALL_ROOT/bot/" --exclude node_modules --exclude /state
 rsync -a --delete "$REPO_ROOT/templates/" "$INSTALL_ROOT/templates/"
 rsync -a --delete "$REPO_ROOT/skills/" "$INSTALL_ROOT/skills/"
 cp "$REPO_ROOT/docker-compose.yml" "$INSTALL_ROOT/docker-compose.yml"
@@ -198,16 +327,107 @@ runuser -u officeagent -- env \
 log "installing bot dependencies (bun)"
 (cd "$INSTALL_ROOT/bot" && runuser -u officeagent -- bun install --production)
 
+# Default permission-gate policy (2026-08-16, found live on a GLM-primary
+# trial install): without an explicit policy.yaml, permission-gate-hook.ts
+# falls back to FALLBACK_POLICY = {default_tier: 'confirm'} -- confirm on
+# EVERY mutating tool call, including `reply` itself. Combined with
+# permission_gate.enabled defaulting to false (below), that hook was
+# reachable, found no policy, tried to confirm, hit the disabled relay
+# (HTTP 503), and fail-closed to permanent deny -- the master session could
+# receive a DM (pane-inject) but could never answer it, on ANY backend, not
+# just GLM. Ported from our own production template
+# (office2-git/templates/permission-policy.yaml): default_tier=allow (a
+# bypassPermissions session should just work for ordinary tool use),
+# confirm only on genuinely risky bash patterns (relayed to Telegram as an
+# Allow/Deny button), hard-deny on secrets/destructive git with no button
+# at all. MCP tools (reply/react/edit_message/...) aren't bash patterns, so
+# they fall to default_tier=allow and are never gated.
+cat > "$INSTALL_ROOT/bot/permission-policy.yaml" <<'EOF'
+# Permission gate (bypassPermissions session). Built-in hard-deny (secrets,
+# rm -rf /, mkfs) and built-in confirm (sudo, git push, docker, package
+# installs) always apply on top of this file.
+version: 1
+default_tier: allow
+confirm:
+  bash_patterns: ["systemctl restart", "systemctl stop", "docker "]
+confirm_overrides:
+  builtin_rules:
+    - "git push"
+deny:
+  read_paths:
+    - "**/*.token"
+    - "**/token.txt"
+    - "**/*.pem"
+    - "**/*.p12"
+    - "**/*.pfx"
+    - "**/credentials.json"
+    - "**/*.credentials.json"
+    - "**/secrets/**"
+    - "**/.ssh/**"
+    - "**/*.env"
+  bash_patterns:
+    - "git push --force"
+    - "git push -f"
+    - "git push --delete"
+    - "git push -d "
+    - "push origin :"
+    - "gh repo delete"
+    - "gh repo archive"
+    - "gh api -x delete"
+EOF
+chown officeagent:officeagent "$INSTALL_ROOT/bot/permission-policy.yaml"
+chmod 0644 "$INSTALL_ROOT/bot/permission-policy.yaml"
+
+# Master-session hooks (2026-08-16, critic MF-2/PR#0): without this, a fresh
+# install has NO outgoing DM path at all, on ANY backend (Anthropic or GLM) --
+# .mcp.json alone registers the officeagent-channel tools, but SessionStart/
+# Stop/PreToolUse hooks (fallback-reply, read-receipt, permission-gate) are
+# what actually wire replies/permissions to Telegram. install-hooks.sh writes
+# these into the master session's OWN settings.json (its workspace is
+# $INSTALL_ROOT/bot, matching WorkingDirectory= in the systemd unit) --
+# --agent-id MUST be officeagent-channel, matching .mcp.json's key.
+# --policy-path points PreToolUse at the file just written above -- without
+# it the hook falls back to its workspace-relative default, which doesn't
+# exist on a fresh install either.
+bash "$INSTALL_ROOT/bot/scripts/install-hooks.sh" \
+  --settings "$INSTALL_ROOT/bot/.claude/settings.json" \
+  --chat-id "$OWNER_TELEGRAM_USER_ID" \
+  --webhook-url "http://127.0.0.1:8093/hooks/agent" \
+  --agent-id officeagent-channel \
+  --permission-gate \
+  --policy-path "$INSTALL_ROOT/bot/permission-policy.yaml"
+chown -R officeagent:officeagent "$INSTALL_ROOT/bot/.claude"
+
 # ---------------------------------------------------------------------
 # Step 6/7: start Postgres, run migrations
 # ---------------------------------------------------------------------
 step "6/7 starting Postgres + applying migrations"
 (cd "$INSTALL_ROOT" && docker compose --env-file "$CONFIG_ROOT/officeagent.env" up -d db)
-for i in $(seq 1 30); do
-  docker exec officeagent-db pg_isready -U officeagent -d officeagent >/dev/null 2>&1 && break
+# The official postgres image, on a genuinely first-ever start (fresh empty
+# volume), runs its own internal restart cycle: initdb -> temporary startup
+# to execute init scripts -> shutdown -> final startup. `pg_isready` can
+# return success for a moment during that temporary startup, right before
+# the shutdown -- a client that connects in that exact window gets "FATAL:
+# the database system is shutting down" (found the hard way testing a
+# from-scratch install, not on a re-run against an already-initialized
+# volume, which is why earlier iterative testing never hit this). Require
+# 3 consecutive successful checks, not just one, before trusting readiness.
+ready_streak=0
+for i in $(seq 1 60); do
+  if docker exec officeagent-db pg_isready -U officeagent -d officeagent >/dev/null 2>&1; then
+    ready_streak=$((ready_streak + 1))
+    [ "$ready_streak" -ge 3 ] && break
+  else
+    ready_streak=0
+  fi
+  sleep 1
+done
+# Belt-and-suspenders: retry the actual DDL too, in case the 3-in-a-row
+# check still raced the internal restart on a slow disk.
+for i in $(seq 1 10); do
+  docker exec officeagent-db psql -U officeagent -d officeagent -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1 && break
   sleep 2
 done
-docker exec officeagent-db psql -U officeagent -d officeagent -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
 
 runuser -u officeagent -- env \
   --chdir="$INSTALL_ROOT/gbrain" \
@@ -222,11 +442,18 @@ cp "$REPO_ROOT/systemd/officeagent-db.service" /etc/systemd/system/
 cp "$REPO_ROOT/systemd/officeagent-gbrain.service" /etc/systemd/system/
 cp "$REPO_ROOT/systemd/officeagent-bot.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now officeagent-db.service
-sleep 3
-systemctl enable --now officeagent-gbrain.service
-sleep 3
-systemctl enable --now officeagent-bot.service
+# `enable --now` only STARTS a unit that isn't running yet -- on a re-run
+# (retrying after a fix, or a future upgrade) where the unit is already
+# active (or crash-looping under Restart=), it is a no-op and silently
+# leaves the OLD unit definition (and old code, if bot/gbrain changed)
+# running. `restart` starts a not-yet-running unit exactly like `start`
+# would, so it is always the right call here, not just the already-active
+# case -- every re-run of this script picks up whatever changed.
+for unit in officeagent-db officeagent-gbrain officeagent-bot; do
+  systemctl enable "${unit}.service" >/dev/null
+  systemctl restart "${unit}.service"
+  sleep 3
+done
 
 log ""
 log "Install complete. Check status with:"

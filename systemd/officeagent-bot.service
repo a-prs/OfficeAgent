@@ -5,24 +5,85 @@ Wants=network-online.target
 BindsTo=officeagent-gbrain.service
 
 [Service]
-Type=simple
 User=officeagent
 Group=officeagent
 WorkingDirectory=/opt/officeagent/bot
 EnvironmentFile=/etc/officeagent/officeagent.env
 EnvironmentFile=/etc/officeagent/bot.env
-ExecStart=/usr/bin/bun run src/server.ts
-Restart=always
-RestartSec=5
+Environment=HOME=/home/officeagent
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# src/server.ts is NOT a standalone daemon (see package.json "bin"/"name":
+# "officeagent-bot") -- it's an MCP-stdio plugin `claude` itself loads and
+# keeps a live pipe to. Found the hard way (2026-08-16): running it directly
+# under systemd gives it a /dev/null stdin, which its own orphan-watchdog
+# (designed to detect "my parent claude session died") reads as exactly
+# that, and it self-terminates within its first event-loop tick -- looked
+# like an unexplained instant crash-loop until traced back to this. This
+# unit now matches our own production multi2-orchestrator.service exactly:
+# tmux hosts a live `claude` session, which loads server.ts as its own
+# plugin via --dangerously-load-development-channels. That live session IS
+# what answers private-DM traffic (see channel/notify.ts) -- there is no
+# separate "master session" to build, this already is it.
+# DEFAULT_MODEL_TARGET=alt (2026-08-16): same env-driven GLM/Z.ai-instead-
+# of-Anthropic switch as multichat-entrypoint.sh uses for topic sessions
+# (see that file's comment for the full rationale) -- applied here too,
+# because this master session is a `claude` process exactly like a topic
+# session is, and without this it defaults to real Anthropic auth, which
+# an alt-only deployment (no ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN
+# configured at all) never provides -- it sits on the OAuth login screen
+# forever with no human able to reach the pane to complete it. Wrapped in
+# /bin/sh -c because ExecStart= itself has no conditional syntax.
+# --mcp-config /opt/officeagent/bot/.mcp.json --strict-mcp-config (2026-08-16, critic MF-4): a
+# project-scope .mcp.json otherwise triggers Claude Code's interactive
+# "New MCP server found in this project" approval dialog on first run --
+# blind ExecStartPost keystrokes can't reliably answer a dialog that isn't
+# guaranteed to even be showing yet. Explicit --mcp-config bypasses that
+# dialog entirely and is deterministic regardless of cwd/prior state --
+# same flag combo topic sessions already use in multichat-entrypoint.sh.
+# officeagent-channel (the .mcp.json key AND the "name" server.ts registers
+# itself under AND the mcp__<name>__reply prefix fallback-reply-hook.ts
+# matches on) must stay consistent across all three or replies get sent
+# twice (once via the tool, once via the fallback hook, which never sees
+# the tool call it should suppress on).
+# --dangerously-load-development-channels REMOVED (2026-08-16, GLM-primary
+# trial install): disassembly of claude.exe traced its channel-push path to
+# `gateChannelServer`, gated behind the GrowthBook flag `tengu_harbor` --
+# which only resolves true for sessions with a real Anthropic-authenticated
+# login (cached in ~/.claude.json). A GLM/Z.ai-only session never gets it:
+# the flag silently no-ops ("Channels are not currently available" in the
+# pane) and inbound DM delivery via that path never happens, regardless of
+# how correctly everything else is wired. bot/src/telegram/handlers.ts now
+# delivers to this pane directly (channel/pane-inject.ts: tmux
+# load-buffer/paste-buffer, same as a human pasting text and hitting
+# Enter) instead of relying on that push -- so the flag brings no benefit
+# even on a real Anthropic-authenticated install, and dropping it also
+# removes a THIRD one-time interactive dialog class ("WARNING: Loading
+# development channels") that model-switch.ts's dismiss-dev-channels.sh
+# helper existed only to fight.
+Type=forking
+ExecStart=/bin/sh -c '\
+  if [ "$DEFAULT_MODEL_TARGET" = "alt" ]; then \
+    export ANTHROPIC_BASE_URL="$ALT_PROVIDER_BASE_URL"; \
+    export ANTHROPIC_AUTH_TOKEN="$ALT_PROVIDER_TOKEN"; \
+    exec /usr/bin/tmux new-session -d -s officeagent-bot claude --model "$ALT_PROVIDER_MODEL" --permission-mode bypassPermissions --mcp-config /opt/officeagent/bot/.mcp.json --strict-mcp-config; \
+  fi; \
+  exec /usr/bin/tmux new-session -d -s officeagent-bot claude --permission-mode bypassPermissions --mcp-config /opt/officeagent/bot/.mcp.json --strict-mcp-config'
+ExecStartPost=/bin/sh -c 'sleep 6 && /usr/bin/tmux send-keys -t officeagent-bot Enter && sleep 2 && /usr/bin/tmux send-keys -t officeagent-bot Enter'
+ExecStop=/usr/bin/tmux kill-session -t officeagent-bot
+Restart=on-failure
+RestartSec=15
 
-# NOT sandboxed as tightly as gbrain: this process spawns tmux panes
-# running the `claude` CLI, which itself needs to read/write the owner's
-# per-topic workspaces under /data or /opt/officeagent/workspaces and
-# $HOME/.claude — a strict ProtectSystem=strict here would break Claude
-# Code's own state directory. ProtectHome/PrivateTmp are still safe.
-NoNewPrivileges=true
-ProtectHome=false
-PrivateTmp=true
+# No NoNewPrivileges/ProtectHome/PrivateTmp here (2026-08-16, found the hard
+# way): our real multi2-orchestrator.service, which this unit otherwise
+# matches line for line, has none of that hardening either, and adding it
+# is not free -- NoNewPrivileges=true blocks tmux's setgid `utempter`
+# helper from doing its job (pty accounting in utmp), which manifested as
+# "utempter: pututline: Permission denied" immediately followed by the
+# tmux client getting killed before the session ever came up. Same lesson
+# as the per-topic-isolation redesign earlier this session: don't add
+# protection our own production system doesn't have without a concrete
+# reason tied to OfficeAgent's actual (single-owner) threat model -- see
+# plan §0.7.
 
 [Install]
 WantedBy=multi-user.target

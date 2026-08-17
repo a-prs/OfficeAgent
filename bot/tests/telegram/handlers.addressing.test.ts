@@ -217,6 +217,7 @@ function makeDeps(opts: MakeDepsOpts = {}): {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       notification: async () => undefined,
     } as any,
+    paneInject: async () => true,
     config,
     statePaths,
     telegramApi: tg,
@@ -536,6 +537,13 @@ describe('FIX-D M1 — text handler policy/router XOR check', () => {
           notifyCalls.push({ method: msg.method, params: msg.params })
         },
       } as any,
+      paneInject: async (_cfg, event) => {
+        notifyCalls.push({
+          method: 'notifications/claude/channel',
+          params: { content: event.content, meta: event.meta },
+        })
+        return true
+      },
       config: makeConfig(),
       statePaths,
       telegramApi: tg.api,
@@ -579,6 +587,13 @@ describe('FIX-D M1 — text handler policy/router XOR check', () => {
           notifyCalls.push({ method: msg.method, params: msg.params })
         },
       } as any,
+      paneInject: async (_cfg, event) => {
+        notifyCalls.push({
+          method: 'notifications/claude/channel',
+          params: { content: event.content, meta: event.meta },
+        })
+        return true
+      },
       config: makeConfig(),
       statePaths,
       telegramApi: tg.api,
@@ -637,6 +652,13 @@ describe('hybrid routing — DM to master, groups to per-chat (router wired)', (
           notifyCalls.push({ method: msg.method, params: msg.params })
         },
       } as any,
+      paneInject: async (_cfg, event) => {
+        notifyCalls.push({
+          method: 'notifications/claude/channel',
+          params: { content: event.content, meta: event.meta },
+        })
+        return true
+      },
       config: makeConfig(),
       statePaths,
       telegramApi: makeTelegramApi().api,

@@ -24,7 +24,17 @@ import type { StatusManager } from '../status/status-manager.js'
 import type { MultichatPolicy } from '../chats/policy-loader.js'
 import type { MultichatRouter } from '../router/multichat-router.js'
 import type { InboundMessage } from '../router/inbox-bridge.js'
-import { sendChannelNotification, type ChannelEvent } from '../channel/notify.js'
+import type { ChannelEvent } from '../channel/notify.js'
+import { injectIntoMasterPane, type PaneInjectConfig } from '../channel/pane-inject.js'
+
+// Injected so tests can stub out real tmux calls the same way they already
+// stub `server.notification` — see channel/pane-inject.ts for what the
+// default implementation does.
+export type PaneInjector = (
+  cfg: PaneInjectConfig,
+  event: ChannelEvent,
+  log: Logger,
+) => Promise<boolean>
 import { gateTelegramMessage, type GateInput } from './gate.js'
 import { isAddressedToBot } from './addressing.js'
 import {
@@ -104,6 +114,10 @@ export interface AlbumDispatchDeps {
   // concatenated). Otherwise the legacy MCP notify path runs.
   router?: MultichatRouter
   policy?: MultichatPolicy
+  // Overrides the real tmux pane injection — tests supply a spy here the
+  // same way they supply a mock `server`. Defaults to injectIntoMasterPane
+  // when absent (production wiring never sets this).
+  paneInject?: PaneInjector
 }
 
 export interface HandlerDeps {
@@ -173,6 +187,8 @@ export interface HandlerDeps {
   // wiring / tests that predate TASK-2), the consumption is skipped
   // and inbound text flows through the existing paths unchanged.
   askUserQuestionUi?: AskUserQuestionUi
+  // Overrides the real tmux pane injection — see AlbumDispatchDeps.paneInject.
+  paneInject?: PaneInjector
 }
 
 // Coerce grammY's reply_to_message Message shape into the narrower
@@ -338,6 +354,22 @@ function gateInputFromContext(ctx: Context): GateInput {
 
 // Shared metadata layout. Identifier-style keys only — notify.normalizeMeta
 // will silently drop hyphens, but we never emit them in the first place.
+// Derives pane-inject targeting from config.master_pane — see
+// channel/pane-inject.ts for why the legacy DM/album path delivers this way
+// instead of via sendChannelNotification.
+// Defensive fallbacks (not just the zod defaults) because several test
+// fixtures build AppConfig object literals by hand rather than through
+// loadConfig()/AppConfigSchema.parse() — at runtime (no type erasure) an
+// omitted optional-with-default field is simply absent, not defaulted.
+function masterPaneConfig(config: AppConfig): PaneInjectConfig {
+  const masterPane = config.master_pane as AppConfig['master_pane'] | undefined
+  return {
+    paneTarget: masterPane?.target ?? 'officeagent-bot',
+    serverName: masterPane?.server_name ?? 'officeagent-channel',
+    ...(masterPane?.socket_name !== undefined ? { socketName: masterPane.socket_name } : {}),
+  }
+}
+
 function buildMeta(
   decision: { kind: 'allow'; senderId: string; chatId: string },
   ctx: Context,
@@ -537,9 +569,11 @@ async function gateAndNotify(
     return
   }
 
-  // Legacy path: MCP-notify the master Claude session. Kept for the
+  // Legacy path: deliver to the master Claude session. Kept for the
   // single-chat (DM-only) wiring; will be removed once all deployments
-  // run multichat.
+  // run multichat. Delivery is via pane-inject (channel/pane-inject.ts),
+  // not the MCP `notifications/claude/channel` push — that push requires
+  // an Anthropic-account-gated feature flag a GLM-only session never gets.
   const content = buildChannelContent({
     text: buildText(),
     bot: deps.bot,
@@ -571,12 +605,13 @@ async function gateAndNotify(
   }
 
   deps.log.info('inbound delivered', { kind, chat_id: decision.chatId })
-  const delivered = await sendChannelNotification(deps.server, event, deps.log)
+  const paneInject = deps.paneInject ?? injectIntoMasterPane
+  const delivered = await paneInject(masterPaneConfig(deps.config), event, deps.log)
   if (!delivered) {
     // Throw so the poller dead-letters this update AND advances offset (it
     // does that on every handler throw). We never want infinite redelivery
-    // for a notify-transport failure — the channel may be torn down.
-    throw new Error('channel notify failed — message dead-lettered')
+    // for a pane-injection failure — the master tmux session may be down.
+    throw new Error('master pane injection failed — message dead-lettered')
   }
 }
 
@@ -720,6 +755,7 @@ async function tryRouteToAlbumBuffer(
     ...(deps.statusManager !== undefined ? { statusManager: deps.statusManager } : {}),
     ...(deps.router !== undefined ? { router: deps.router } : {}),
     ...(deps.policy !== undefined ? { policy: deps.policy } : {}),
+    ...(deps.paneInject !== undefined ? { paneInject: deps.paneInject } : {}),
   }
   const chatIdAtPush = decision.chatId
   const senderIdAtPush = decision.senderId
@@ -1001,7 +1037,8 @@ export async function sendAlbumNotification(
     media_group_id: ids.mediaGroupId,
     album_size: album.messages.length,
   })
-  const delivered = await sendChannelNotification(deps.server, event, deps.log)
+  const paneInject = deps.paneInject ?? injectIntoMasterPane
+  const delivered = await paneInject(masterPaneConfig(deps.config), event, deps.log)
   if (!delivered) {
     // Bug #2 (TASK-4): throw so the caller dead-letters the on-disk
     // album dir. Pre-fix this logged "content lost"; now persistence

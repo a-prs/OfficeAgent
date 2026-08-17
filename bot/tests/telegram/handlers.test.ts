@@ -191,8 +191,21 @@ function makeDeps(
   const bot: BotIdentity = { id: 8507713167, username: 'canarybot' }
   const { api } = makeTelegramApi()
   const server = overrides.server ?? makeServerSpy().server
+  // See handlers.album.test.ts's makeDeps for why this forwards to `server`.
+  const paneInject: HandlerDeps['paneInject'] = async (_cfg, event) => {
+    try {
+      await server.notification({
+        method: 'notifications/claude/channel',
+        params: { content: event.content, meta: event.meta },
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
   const deps: HandlerDeps = {
     server,
+    paneInject,
     config,
     statePaths,
     telegramApi: overrides.telegramApi ?? api,

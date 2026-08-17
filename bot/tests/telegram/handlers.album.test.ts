@@ -245,8 +245,25 @@ function makeDeps(opts: {
   const statePaths = makeStatePaths()
   const bot: BotIdentity = { id: 8507713167, username: 'canarybot' }
   const server = opts.server ?? makeServerSpy().server
+  // Legacy DM/album delivery now goes through deps.paneInject instead of
+  // server.notification directly (see channel/pane-inject.ts) — this
+  // default just forwards to the mocked `server`, so every existing test
+  // built around a server-notification spy/failure-mock keeps working
+  // unchanged.
+  const paneInject: HandlerDeps['paneInject'] = async (_cfg, event) => {
+    try {
+      await server.notification({
+        method: 'notifications/claude/channel',
+        params: { content: event.content, meta: event.meta },
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
   const deps: HandlerDeps = {
     server,
+    paneInject,
     config,
     statePaths,
     telegramApi: opts.telegramApi ?? makeTelegramApi(),
