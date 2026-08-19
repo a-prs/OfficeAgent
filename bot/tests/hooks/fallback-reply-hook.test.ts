@@ -33,7 +33,7 @@ function line(role: 'assistant' | 'user', content: unknown, uuid?: string): stri
 }
 
 const TG_PROMPT = (chatId: string, msgId: number): string =>
-  `<channel source="office2-channel" source="telegram" chat_id="${chatId}" message_id="${msgId}">hi</channel>`
+  `<channel source="officeagent-channel" source="telegram" chat_id="${chatId}" message_id="${msgId}">hi</channel>`
 
 describe('extractLeadingTelegramChatId (FIX 2 + FIX 7)', () => {
   test('extracts chat_id from a leading raw envelope', () => {
@@ -90,7 +90,7 @@ describe('analyzeCurrentTurn', () => {
     const transcript = [
       line('user', TG_PROMPT('1', 10)),
       line('assistant', [{ type: 'text', text: 'answer' }], 'u1'),
-      line('assistant', [{ type: 'tool_use', name: 'mcp__office2-channel__reply', input: {} }], 'u2'),
+      line('assistant', [{ type: 'tool_use', name: 'mcp__officeagent-channel__reply', input: {} }], 'u2'),
     ].join('\n')
     const r = analyzeCurrentTurn(transcript)
     expect(r.replied).toBe(true)
@@ -99,7 +99,7 @@ describe('analyzeCurrentTurn', () => {
   test('edit_message tool_use also counts as replied', () => {
     const transcript = [
       line('user', TG_PROMPT('1', 10)),
-      line('assistant', [{ type: 'tool_use', name: 'mcp__office2-channel__edit_message', input: {} }], 'u1'),
+      line('assistant', [{ type: 'tool_use', name: 'mcp__officeagent-channel__edit_message', input: {} }], 'u1'),
     ].join('\n')
     expect(analyzeCurrentTurn(transcript).replied).toBe(true)
   })

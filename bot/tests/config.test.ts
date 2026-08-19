@@ -13,7 +13,7 @@ import {
 let stateDir: string
 
 beforeEach(() => {
-  stateDir = mkdtempSync(join(tmpdir(), 'office2-channel-config-'))
+  stateDir = mkdtempSync(join(tmpdir(), 'officeagent-channel-config-'))
 })
 
 afterEach(() => {

@@ -19,8 +19,8 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 # (designed to detect "my parent claude session died") reads as exactly
 # that, and it self-terminates within its first event-loop tick -- looked
 # like an unexplained instant crash-loop until traced back to this. This
-# unit now matches our own production multi2-orchestrator.service in
-# shape: tmux hosts a live `claude` session, which loads server.ts as its
+# unit now matches our own production deployment in shape: tmux hosts a
+# live `claude` session, which loads server.ts as its
 # own MCP plugin via --mcp-config/--strict-mcp-config (see below -- unlike
 # production, NOT via --dangerously-load-development-channels, which this
 # unit deliberately omits). That live session IS what answers private-DM
@@ -76,7 +76,7 @@ Restart=on-failure
 RestartSec=15
 
 # No NoNewPrivileges/ProtectHome/PrivateTmp here (2026-08-16, found the hard
-# way): our real multi2-orchestrator.service, which this unit otherwise
+# way): our own real production deployment, which this unit otherwise
 # matches line for line, has none of that hardening either, and adding it
 # is not free -- NoNewPrivileges=true blocks tmux's setgid `utempter`
 # helper from doing its job (pty accounting in utmp), which manifested as

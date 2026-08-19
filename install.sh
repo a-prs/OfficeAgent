@@ -395,8 +395,8 @@ cp "$INSTALL_ROOT/bot/src/chats/hooks/multichat-entrypoint.sh" \
   "$INSTALL_ROOT/bot/src/chats/hooks/stop-to-outbox.py" \
   "$WORKSPACES_ROOT/chats/hooks/"
 chmod 0755 "$WORKSPACES_ROOT/chats/hooks/"*.sh "$WORKSPACES_ROOT/chats/hooks/"*.py
-# Hooks registration mirrors our own production chats/.claude/settings.json
-# exactly (office2-git/templates) -- unlike the master session's
+# Hooks registration mirrors our own production per-chat settings.json
+# exactly -- unlike the master session's
 # settings.json, these commands need no TELEGRAM_HOOK_*/bearer-token
 # env-prefixing: the hooks read CHAT_ID/MULTICHAT_STATE_DIR/etc. straight
 # from the process environment multichat-entrypoint.sh already exported.
@@ -456,8 +456,8 @@ log "installing bot dependencies (bun)"
 # reachable, found no policy, tried to confirm, hit the disabled relay
 # (HTTP 503), and fail-closed to permanent deny -- the master session could
 # receive a DM (pane-inject) but could never answer it, on ANY backend, not
-# just GLM. Ported from our own production template
-# (office2-git/templates/permission-policy.yaml): default_tier=allow (a
+# just GLM. Ported from our own production template:
+# default_tier=allow (a
 # bypassPermissions session should just work for ordinary tool use),
 # confirm only on genuinely risky bash patterns (relayed to Telegram as an
 # Allow/Deny button), hard-deny on secrets/destructive git with no button

@@ -44,7 +44,7 @@ function runInstall(extraArgs: string[] = []): { code: number; stderr: string } 
       '--settings', settings,
       '--chat-id', '164795011',
       '--webhook-url', 'http://127.0.0.1:8089/hooks/agent',
-      '--agent-id', 'office2-channel',
+      '--agent-id', 'officeagent-channel',
       ...extraArgs,
     ],
     { encoding: 'utf8', env: { ...process.env, PATH: pathPrefix } },
@@ -65,7 +65,7 @@ describe('install-hooks.sh — fresh settings file', () => {
     // post-hook inherits the live session's CHAT_ID (composite for topics),
     // falling back to the configured chat id for the master session.
     expect(flat).toContain('${CHAT_ID:-164795011}')
-    expect(flat).toContain("TELEGRAM_HOOK_AGENT_ID='office2-channel'")
+    expect(flat).toContain("TELEGRAM_HOOK_AGENT_ID='officeagent-channel'")
   })
 
   test('never writes TELEGRAM_WEBHOOK_TOKEN', () => {
@@ -98,7 +98,7 @@ describe('install-hooks.sh — URL validation (L3)', () => {
         '--settings', settings,
         '--chat-id', '164795011',
         '--webhook-url', badUrl,
-        '--agent-id', 'office2-channel',
+        '--agent-id', 'officeagent-channel',
       ],
       { encoding: 'utf8', env: { ...process.env, PATH: pathPrefix } },
     )
@@ -156,7 +156,7 @@ describe('install-hooks.sh — idempotency', () => {
     // Other plugin's entry must survive.
     const preToolUse = parsed.hooks?.PreToolUse ?? []
     const others = preToolUse.filter((e) => e.marker === 'someone-else')
-    const ours = preToolUse.filter((e) => e.marker === 'office2-channel-hook')
+    const ours = preToolUse.filter((e) => e.marker === 'officeagent-channel-hook')
     expect(others.length).toBe(1)
     expect(ours.length).toBe(1)
     expect(others[0]!.hooks?.[0]?.command).toBe('echo unrelated')
@@ -174,7 +174,7 @@ describe('patchSettingsFile — writeAtomic same-dir staging (regression)', () =
       helperPath: '/abs/post-hook.ts',
     })
     const entries = readFileSync(target, 'utf8')
-    expect(entries).toContain('office2-channel-hook')
+    expect(entries).toContain('officeagent-channel-hook')
     // No leftover *.tmp.* staging file (would imply rename failed silently
     // or temp lived in a different dir).
     const { readdirSync } = await import('fs')
@@ -260,14 +260,14 @@ describe('applyPatch (pure)', () => {
     for (const ev of ['PreToolUse', 'Stop']) {
       const arr = out.hooks[ev] ?? []
       expect(arr.length).toBe(1)
-      expect(arr[0]!.marker).toBe('office2-channel-hook')
+      expect(arr[0]!.marker).toBe('officeagent-channel-hook')
       expect(arr[0]!.hooks?.[0]?.command).toContain('/new/plugin/scripts/post-hook.ts')
       // Old legacy command must be gone.
       expect(arr.find((e) => e.hooks?.[0]?.command === legacyCmd)).toBeUndefined()
     }
   })
 
-  test('replaces previous office2-channel-hook entry rather than appending', () => {
+  test('replaces previous officeagent-channel-hook entry rather than appending', () => {
     let s: Record<string, unknown> = {}
     s = applyPatch(s, {
       settingsPath: '/tmp/x',
@@ -283,7 +283,7 @@ describe('applyPatch (pure)', () => {
     })
     const hooks = (s as { hooks?: Record<string, Array<{ marker?: string; hooks?: Array<{ command?: string }> }>> }).hooks
     const stop = hooks?.Stop ?? []
-    const ours = stop.filter((e) => e.marker === 'office2-channel-hook')
+    const ours = stop.filter((e) => e.marker === 'officeagent-channel-hook')
     expect(ours.length).toBe(1)
     expect(ours[0]!.hooks?.[0]?.command).toContain('http://new')
     expect(ours[0]!.hooks?.[0]?.command).not.toContain('http://old')
@@ -306,7 +306,7 @@ describe('applyPatch (pure)', () => {
     // Hands the bare origin (no /hooks/agent path) to the gate hook.
     expect(pre[0]!.hooks?.[0]?.command).toContain("TELEGRAM_WEBHOOK_URL='http://127.0.0.1:8093'")
     expect(pre[0]!.hooks?.[0]?.command).not.toContain('/hooks/agent')
-    expect(pre.some((e) => e.marker === 'office2-channel-hook')).toBe(true)
+    expect(pre.some((e) => e.marker === 'officeagent-channel-hook')).toBe(true)
     // No gate entry leaks onto other events.
     for (const ev of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop']) {
       expect((out.hooks[ev] ?? []).some((e) => e.marker === 'office2-permission-gate-hook')).toBe(false)
@@ -358,7 +358,7 @@ function countPluginEntries(parsed: Record<string, unknown>): number {
   let total = 0
   for (const arr of Object.values(hooks)) {
     if (!Array.isArray(arr)) continue
-    total += arr.filter((e) => e?.marker === 'office2-channel-hook').length
+    total += arr.filter((e) => e?.marker === 'officeagent-channel-hook').length
   }
   return total
 }

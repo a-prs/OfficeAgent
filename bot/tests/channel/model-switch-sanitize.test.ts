@@ -115,7 +115,7 @@ describe('sanitizeServerToolUseIds', () => {
     // Simulates the per-topic case: multiple sessions share one cwd
     // (chatsBasePath), so mtime-guessing would patch the wrong topic's
     // transcript. explicitSessionId must bypass that guess entirely.
-    const cwd = '/home/office/multi2/orchestrator/.claude/chats'
+    const cwd = '/home/user/officeagent/chats'
     const badId = 'call_target_topic'
     const targetSessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const targetLine = JSON.stringify({
@@ -144,7 +144,7 @@ describe('sanitizeServerToolUseIds', () => {
   })
 
   test('explicitSessionId is a clean no-op when the transcript does not exist yet (fresh topic, --session-id branch)', async () => {
-    const cwd = '/home/office/multi2/orchestrator/.claude/chats-fresh'
+    const cwd = '/home/user/officeagent/chats-fresh'
     await writeTranscript(cwd, 'unrelated.jsonl', [JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] } })])
 
     const result = await sanitizeServerToolUseIds(cwd, silentLog(), projectsRoot, 'ffffffff-0000-0000-0000-000000000000')

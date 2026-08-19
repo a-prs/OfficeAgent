@@ -34,7 +34,7 @@ function makeMcpStub(): StubMcp {
 }
 
 beforeEach(() => {
-  stateDir = mkdtempSync(join(tmpdir(), 'office2-channel-fallback-'))
+  stateDir = mkdtempSync(join(tmpdir(), 'officeagent-channel-fallback-'))
   delete process.env.TELEGRAM_WEBHOOK_TOKEN
   const env = {
     TELEGRAM_BOT_TOKEN: FAKE_TOKEN,

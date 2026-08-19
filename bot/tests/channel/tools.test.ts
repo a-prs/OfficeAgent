@@ -91,7 +91,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 function makeStatePaths(): StatePaths {
-  const root = mkdtempSync(join(tmpdir(), 'office2-channel-tools-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'officeagent-channel-tools-test-'))
   return {
     root,
     env: join(root, '.env'),

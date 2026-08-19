@@ -38,7 +38,7 @@ let stateDir: string
 let paths: StatePaths
 
 beforeEach(() => {
-  stateDir = mkdtempSync(join(tmpdir(), 'office2-channel-pid-'))
+  stateDir = mkdtempSync(join(tmpdir(), 'officeagent-channel-pid-'))
   const env = { TELEGRAM_BOT_TOKEN: FAKE_TOKEN, TELEGRAM_STATE_DIR: stateDir }
   const cfg = loadConfig(env)
   paths = getStatePaths(cfg, {

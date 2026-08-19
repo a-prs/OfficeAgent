@@ -41,7 +41,7 @@ function makeMcpStub(): { server: any; calls: Captured[] } {
 }
 
 beforeEach(() => {
-  stateDir = mkdtempSync(join(tmpdir(), 'office2-channel-webhook-'))
+  stateDir = mkdtempSync(join(tmpdir(), 'officeagent-channel-webhook-'))
   // Clean env in case earlier tests leaked.
   delete process.env.TELEGRAM_WEBHOOK_TOKEN
   const env = {
@@ -406,12 +406,12 @@ describe('POST /hooks/agent', () => {
         'Authorization': `Bearer ${WEBHOOK_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ message: 'hi', chatId: 164795011, agentId: 'office2-channel' }),
+      body: JSON.stringify({ message: 'hi', chatId: 164795011, agentId: 'officeagent-channel' }),
     })
     expect(resp.status).toBe(200)
     expect(mcp.calls.length).toBe(1)
     const params = mcp.calls[0]!.params as { meta: Record<string, string> }
-    expect(params.meta.agent_id).toBe('office2-channel')
+    expect(params.meta.agent_id).toBe('officeagent-channel')
   })
 
   test('unknown path returns 404', async () => {
@@ -502,7 +502,7 @@ describe('POST /hooks/agent — Claude hook payload branch', () => {
       },
       body: JSON.stringify({
         chatId: 164795011,
-        agentId: 'office2-channel',
+        agentId: 'officeagent-channel',
         hook_event_name: 'PreToolUse',
         session_id: 's1',
         transcript_path: '/tmp/t.jsonl',
