@@ -463,6 +463,41 @@ describe('loadConfig', () => {
     const paths = getStatePaths(cfg, parsedEnv)
     expect(paths.logs.ask_user_question).toBe(join(stateDir, 'logs', 'ask-user-question.jsonl'))
   })
+
+  // bot_id/allowed_user_ids have no schema default (by design — see
+  // AppConfigSchema comments) and this file's shared env() helper doesn't
+  // supply them, so every bare env() call in this describe block currently
+  // throws "invalid config" independent of alt_provider (pre-existing gap,
+  // matches README's documented test-fixture debt) — supplied explicitly
+  // here so these three tests assert alt_provider in isolation.
+  const withRequired = (overrides: Record<string, string> = {}) => env({
+    TELEGRAM_EXPECTED_BOT_ID: '8507713167',
+    TELEGRAM_ALLOWED_USER_IDS: '164795011',
+    ...overrides,
+  })
+
+  test('alt_provider: disabled by default (no ALT_PROVIDER_TOKEN)', () => {
+    const cfg = loadConfig(withRequired())
+    expect(cfg.alt_provider.enabled).toBe(false)
+  })
+
+  test('alt_provider: ALT_PROVIDER_TOKEN presence enables it and threads through base_url/model/label', () => {
+    const cfg = loadConfig(withRequired({
+      ALT_PROVIDER_TOKEN: 'fake-glm-token',
+      ALT_PROVIDER_BASE_URL: 'https://api.z.ai/api/anthropic',
+      ALT_PROVIDER_MODEL: 'glm-5.2',
+      ALT_PROVIDER_LABEL: 'GLM 5.2 (Z.ai)',
+    }))
+    expect(cfg.alt_provider.enabled).toBe(true)
+    expect(cfg.alt_provider.base_url).toBe('https://api.z.ai/api/anthropic')
+    expect(cfg.alt_provider.model).toBe('glm-5.2')
+    expect(cfg.alt_provider.label).toBe('GLM 5.2 (Z.ai)')
+  })
+
+  test('alt_provider: whitespace-only ALT_PROVIDER_TOKEN does not enable it', () => {
+    const cfg = loadConfig(withRequired({ ALT_PROVIDER_TOKEN: '   ' }))
+    expect(cfg.alt_provider.enabled).toBe(false)
+  })
 })
 
 describe('single progress surface defaults (2026-06-09 duplicate-windows fix)', () => {

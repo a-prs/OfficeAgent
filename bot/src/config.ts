@@ -375,6 +375,21 @@ export const RuntimeEnvSchema = z.object({
     .string()
     .transform((v) => /^(1|true|yes|on)$/i.test(v))
     .optional(),
+  // Alt-provider / /model switch (2026-08-19): install.sh already writes
+  // these four (no TELEGRAM_ prefix — they're also read directly by
+  // officeagent-bot.service's shell ExecStart and by spawn-chat-shell.sh's
+  // env allowlist, so reusing the same names avoids a second variable
+  // meaning the same thing). `enabled` has no env var of its own — it's
+  // derived below from ALT_PROVIDER_TOKEN's presence, the same "configured
+  // implies on" rule install.sh itself uses for DEFAULT_MODEL_TARGET=alt.
+  // ALT_PROVIDER_TOKEN is intentionally NOT stored into AppConfig — the
+  // running ModelSwitch instance re-reads it fresh from process.env via
+  // readAltProviderToken() (server.ts), matching how it already worked
+  // before this schema gap was found; only used here to detect presence.
+  ALT_PROVIDER_BASE_URL: z.string().optional(),
+  ALT_PROVIDER_TOKEN: z.string().optional(),
+  ALT_PROVIDER_MODEL: z.string().optional(),
+  ALT_PROVIDER_LABEL: z.string().optional(),
 })
 export type RuntimeEnv = z.infer<typeof RuntimeEnvSchema>
 
@@ -575,6 +590,22 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     permissionGate.enabled = parsedEnv.TELEGRAM_PERMISSION_GATE_ENABLED
   }
   if (Object.keys(permissionGate).length > 0) merged.permission_gate = permissionGate
+
+  // Alt-provider env overrides (2026-08-19). `enabled` is derived, not a
+  // direct env flag — set to true whenever a non-empty ALT_PROVIDER_TOKEN
+  // is present, same "configured means on" convention install.sh already
+  // uses for DEFAULT_MODEL_TARGET=alt. The token itself is deliberately not
+  // copied into merged config — see RuntimeEnvSchema's comment above.
+  const altProvider = (merged.alt_provider && typeof merged.alt_provider === 'object'
+    ? merged.alt_provider
+    : {}) as Record<string, unknown>
+  if (parsedEnv.ALT_PROVIDER_TOKEN !== undefined && parsedEnv.ALT_PROVIDER_TOKEN.trim() !== '') {
+    altProvider.enabled = true
+  }
+  if (parsedEnv.ALT_PROVIDER_BASE_URL !== undefined) altProvider.base_url = parsedEnv.ALT_PROVIDER_BASE_URL
+  if (parsedEnv.ALT_PROVIDER_MODEL !== undefined) altProvider.model = parsedEnv.ALT_PROVIDER_MODEL
+  if (parsedEnv.ALT_PROVIDER_LABEL !== undefined) altProvider.label = parsedEnv.ALT_PROVIDER_LABEL
+  if (Object.keys(altProvider).length > 0) merged.alt_provider = altProvider
 
   try {
     return AppConfigSchema.parse(merged)

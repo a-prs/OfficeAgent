@@ -21,30 +21,23 @@
 // If ALT_PROVIDER_TOKEN (or whatever token_env names) is unset, the /model
 // command simply never offers the alt target — see oob.ts.
 
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
 import type { Logger } from '../log.js'
 
 const execFileAsync = promisify(execFile)
 
-// Resolve the out-of-pane dismissal helper relative to THIS module so it
-// works regardless of cwd. The helper lives at
-// `plugin/scripts/dismiss-dev-channels.sh`; this file is at
-// `plugin/src/channel/model-switch.ts`, so `../../scripts/...` from the
-// module's dir yields the right path in both source and compiled layouts.
-const MODULE_DIR = dirname(fileURLToPath(import.meta.url))
-const DISMISS_SCRIPT_PATH = resolve(
-  MODULE_DIR,
-  '..',
-  '..',
-  'scripts',
-  'dismiss-dev-channels.sh',
-)
+// Must match officeagent-bot.service's ExecStart exactly (both the
+// non-alt and DEFAULT_MODEL_TARGET=alt branches) — a respawned pane that
+// drifts from these flags either loses the MCP tool surface (reply/react/
+// download_attachment) or hits the interactive "New MCP server found"
+// dialog with nobody at the pane to answer it.
+const MCP_CONFIG_PATH = '/opt/officeagent/bot/.mcp.json'
+const MASTER_FLAGS = `--permission-mode bypassPermissions --mcp-config ${MCP_CONFIG_PATH} --strict-mcp-config`
 
 export type ModelTarget = 'primary' | 'alt'
 
@@ -314,20 +307,6 @@ export class ModelSwitch implements ModelSwitchLike {
     const { socketName, altProviderBaseUrl, altProviderToken, altProviderModel, log } = this.opts
     const paneTarget = topic?.paneTarget ?? this.opts.paneTarget
 
-    // CRITICAL: must match the systemd ExecStart flag (`claude
-    // --dangerously-load-development-channels server:officeagent-channel`) or the
-    // respawned pane resumes the conversation via --continue but boots
-    // WITHOUT the officeagent-channel plugin — no Telegram bridge, no reply/
-    // download_attachment tools, no inbound notification path. Confirmed
-    // 2026-07-27: this omission is the likely cause of the DM message-loss
-    // incident that required a full `systemctl restart` to recover (a plain
-    // restart re-runs the correct ExecStart, which does include the flag).
-    // Topic sessions never load this plugin in the first place (see
-    // TopicSwitchOverride doc comment) — omit the flag for them entirely.
-    const channelFlag = topic
-      ? ''
-      : ' --dangerously-load-development-channels server:officeagent-channel'
-
     // Only the alt -> primary direction is at risk (see
     // sanitizeServerToolUseIds' doc comment) — an alt provider's own
     // endpoint accepts whatever shape it itself produced, so there is
@@ -454,9 +433,9 @@ export class ModelSwitch implements ModelSwitchLike {
       innerCmd =
         `ANTHROPIC_BASE_URL=${shellQuote(altProviderBaseUrl!)} `
         + `ANTHROPIC_AUTH_TOKEN=${shellQuote(altProviderToken!)} `
-        + `claude --continue${modelFlag}${channelFlag}`
+        + `claude --continue${modelFlag} ${MASTER_FLAGS}`
     } else {
-      innerCmd = `claude --continue${channelFlag}`
+      innerCmd = `claude --continue ${MASTER_FLAGS}`
     }
 
     const args = [...targetSocketArgs, 'respawn-pane', '-k', '-t', paneTarget, innerCmd]
@@ -464,27 +443,12 @@ export class ModelSwitch implements ModelSwitchLike {
     try {
       await execFileAsync('tmux', args, { timeout: 10_000 })
       log.info('model-switch respawned pane', { target, paneTarget })
-      // CRITICAL: --dangerously-load-development-channels shows an
-      // interactive "WARNING: Loading development channels" confirmation
-      // (1. I am using this for local development / 2. Exit, Enter to
-      // confirm) on every fresh process start. respawn-pane only sends the
-      // argv, not keystrokes, so the new process sits silently at this
-      // prompt forever — no error, no channel bridge, nothing.
-      //
-      // ARCHITECTURE (2026-07-29): the dismissal MUST run OUT of the pane,
-      // not inside this server.ts process. server.ts is a CHILD of the
-      // `claude` process (PPid == claude), so respawn-pane -k kills it
-      // together with claude the instant the respawn fires — any in-process
-      // poll+Enter scheduled here (the earlier `void confirmDevChannelsPrompt`
-      // approach) dies before it can ever press a key. That is why every
-      // live switch left the pane stuck on the warning until a human pressed
-      // Enter by hand. The systemd unit's ExecStartPost avoids this because
-      // it sends Enter from systemd (a child of PID 1), OUTSIDE the pane.
-      // We mirror that by launching the dismissal helper DETACHED
-      // (setsid + stdio:'ignore' + unref) so it is reparented to init and
-      // survives the pane death. The helper itself polls capture-pane and
-      // presses Enter the moment the warning renders (no blind sleeps).
-      this.launchDevChannelsDismissal(paneTarget, socketName)
+      // No post-respawn dismissal step needed: officeagent-bot.service
+      // dropped --dangerously-load-development-channels entirely (see that
+      // unit's comment) — the "Loading development channels" dialog this
+      // used to fight can no longer appear, and the Bypass Permissions
+      // dialog is pre-accepted at the user-settings level
+      // (skipDangerousModePermissionPrompt, see install.sh step 3).
       return { ok: true, target }
     } catch (err) {
       // SECURITY: never surface err.message/err.cmd here — Node's execFile
@@ -500,37 +464,6 @@ export class ModelSwitch implements ModelSwitchLike {
           : `exit code ${e.code ?? 'unknown'}`
       log.warn('model-switch respawn failed', { target, paneTarget, detail: safeDetail })
       return { ok: false, target, error: safeDetail }
-    }
-  }
-
-  // Launch the OUT-OF-PANE dev-channels warning dismissal as a detached,
-  // unref'd subprocess that survives the respawn (which kills this
-  // server.ts process — see the ARCHITECTURE note above). Fire-and-forget:
-  // the helper writes diagnostics to its own log file; we never await it.
-  private launchDevChannelsDismissal(paneTarget: string, socketName?: string): void {
-    const helperArgs = [paneTarget]
-    if (socketName) helperArgs.push(socketName)
-    try {
-      const child = spawn(
-        'setsid',
-        [DISMISS_SCRIPT_PATH, ...helperArgs],
-        {
-          detached: true,
-          stdio: 'ignore',
-        },
-      )
-      child.on('error', (err) => {
-        this.opts.log.warn('model-switch: failed to spawn detached dismiss helper', {
-          paneTarget,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      })
-      child.unref()
-    } catch (err) {
-      this.opts.log.warn('model-switch: spawn of dismiss helper threw', {
-        paneTarget,
-        error: err instanceof Error ? err.message : String(err),
-      })
     }
   }
 }

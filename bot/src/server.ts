@@ -536,18 +536,32 @@ if (config.alt_provider.enabled && masterPaneTarget !== undefined) {
 // multichatStateDir) so master-only deployments (multichat disabled) still
 // get working /hooks/model/status without depending on multichat setup.
 const modelSwitchStateFilePath = join(statePaths.root, 'model-switch-state.json')
-// Self-check on boot (2026-07-30): the master's own switch (unlike a
-// topic's) always kills THIS process the instant `tmux respawn-pane -k`
-// fires — nothing queued after that call is guaranteed to run, so the
-// master can never reliably self-report "I just switched to the alt
-// provider" from inside the switch itself. Instead, every fresh master
-// process (whether booted by systemd's default ExecStart or by a /model
-// respawn) reports its OWN actual state at startup by reading its own
-// argv — this is what makes the master's status entry converge to truth
-// after any restart path, not just switches that went through this
-// codebase.
+// Self-check on boot (2026-07-30, corrected 2026-08-19): the master's own
+// switch (unlike a topic's) always kills THIS process the instant `tmux
+// respawn-pane -k` fires — nothing queued after that call is guaranteed to
+// run, so the master can never reliably self-report "I just switched to
+// the alt provider" from inside the switch itself. Instead, every fresh
+// master process (whether booted by systemd's default ExecStart or by a
+// /model respawn) reports its OWN actual state at startup — this is what
+// makes the master's status entry converge to truth after any restart
+// path, not just switches that went through this codebase.
+//
+// Originally read `process.argv.includes('--model')`, ported unchanged
+// from production's channel-plugin. That heuristic checks the CLAUDE
+// process's own argv — in OfficeAgent, server.ts is a SEPARATE `bun
+// ./src/server.ts` child claude loads via .mcp.json (see that file), so
+// `--model` (passed to `claude`, not to this child) never appears in
+// process.argv here — found live 2026-08-19: model-switch-state.json read
+// "primary" right after a fresh DEFAULT_MODEL_TARGET=alt boot. Checking
+// ANTHROPIC_BASE_URL instead works on both boot paths: officeagent-bot.
+// service's alt ExecStart branch exports it before exec'ing tmux, and
+// model-switch.ts's alt respawn sets it as an inline env prefix on the
+// respawned command — both inherited down to this child process either way.
 if (modelSwitch !== null && masterPaneTarget !== undefined) {
-  const bootedOnAlt = process.argv.includes('--model')
+  const altBaseUrl = config.alt_provider.base_url
+  const bootedOnAlt = altBaseUrl !== undefined
+    && altBaseUrl !== ''
+    && process.env.ANTHROPIC_BASE_URL === altBaseUrl
   void setModelState(modelSwitchStateFilePath, masterPaneTarget, bootedOnAlt ? 'alt' : 'primary', log)
 }
 

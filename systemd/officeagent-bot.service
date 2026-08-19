@@ -19,11 +19,13 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 # (designed to detect "my parent claude session died") reads as exactly
 # that, and it self-terminates within its first event-loop tick -- looked
 # like an unexplained instant crash-loop until traced back to this. This
-# unit now matches our own production multi2-orchestrator.service exactly:
-# tmux hosts a live `claude` session, which loads server.ts as its own
-# plugin via --dangerously-load-development-channels. That live session IS
-# what answers private-DM traffic (see channel/notify.ts) -- there is no
-# separate "master session" to build, this already is it.
+# unit now matches our own production multi2-orchestrator.service in
+# shape: tmux hosts a live `claude` session, which loads server.ts as its
+# own MCP plugin via --mcp-config/--strict-mcp-config (see below -- unlike
+# production, NOT via --dangerously-load-development-channels, which this
+# unit deliberately omits). That live session IS what answers private-DM
+# traffic (see channel/pane-inject.ts) -- there is no separate "master
+# session" to build, this already is it.
 # DEFAULT_MODEL_TARGET=alt (2026-08-16): same env-driven GLM/Z.ai-instead-
 # of-Anthropic switch as multichat-entrypoint.sh uses for topic sessions
 # (see that file's comment for the full rationale) -- applied here too,
