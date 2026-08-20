@@ -498,6 +498,33 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   }
   if (parsedEnv.TELEGRAM_ALLOWED_USER_IDS !== undefined) {
     merged.allowed_user_ids = parseCsvUserIds(parsedEnv.TELEGRAM_ALLOWED_USER_IDS)
+    // Single-owner installs (install.sh) only ever set TELEGRAM_ALLOWED_USER_IDS
+    // -- nothing sets permission_relay.allowed_user_ids separately, so it
+    // silently kept its schema default ([]). resolvePermissionGateAllowedUserIds
+    // and resolveAskUserQuestionAllowedUserIds both inherit from
+    // permission_relay.allowed_user_ids when their own field is unset, so an
+    // empty [] here permanently fail-closed BOTH features for every install --
+    // no Allow/Deny keyboard for any confirm-tier tool call, no AskUserQuestion
+    // relay, with no visible error until a hook actually fires (found live,
+    // 2026-08-20 -- "no permission-gate recipient configured; fail-closed").
+    // Default the relay's answerer set to the same allowlist -- still
+    // overridable via an explicit permission_relay.allowed_user_ids in
+    // config.json, which takes precedence below.
+    const existingPermissionRelay = merged.permission_relay
+    const existingAllowedUserIds =
+      existingPermissionRelay !== undefined
+      && typeof existingPermissionRelay === 'object'
+      && existingPermissionRelay !== null
+        ? (existingPermissionRelay as Record<string, unknown>).allowed_user_ids
+        : undefined
+    if (existingAllowedUserIds === undefined) {
+      merged.permission_relay = {
+        ...(typeof existingPermissionRelay === 'object' && existingPermissionRelay !== null
+          ? existingPermissionRelay
+          : {}),
+        allowed_user_ids: merged.allowed_user_ids,
+      }
+    }
   }
   if (parsedEnv.TELEGRAM_ALLOWED_CHAT_IDS !== undefined) {
     merged.allowed_chat_ids = parseCsvChatIds(parsedEnv.TELEGRAM_ALLOWED_CHAT_IDS)
