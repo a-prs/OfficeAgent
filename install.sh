@@ -188,6 +188,14 @@ if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
   ALT_PROVIDER_LABEL="GLM 5.2 (Z.ai)"
 fi
 
+# Asked up front, not left for the operator to discover later that voice
+# messages silently don't transcribe (owner: ask this now so nobody has to
+# come back and figure out why voice doesn't work, 2026-08-20). Genuinely
+# optional -- bot/src/telegram/media.ts already degrades gracefully with no
+# GROQ_API_KEY set (voice messages just aren't transcribed), so an empty
+# answer here is a real, supported choice, not a trap.
+read -rp "Groq API key for voice-message transcription (optional, leave empty to skip -- console.groq.com): " GROQ_API_KEY
+
 # README promises "the installer won't let you set up the system with no
 # model at all" -- until now nothing actually enforced that. Found live
 # (2026-08-20): every credential prompt above can be answered blank (e.g.
@@ -318,6 +326,7 @@ TELEGRAM_MASTER_PANE_TARGET=officeagent-bot
 TELEGRAM_MASTER_PANE_SERVER_NAME=officeagent-channel
 TELEGRAM_PERMISSION_GATE_ENABLED=1
 TELEGRAM_STATUS_ENABLED=1
+GROQ_API_KEY=${GROQ_API_KEY}
 EOF
 chmod 0600 "$CONFIG_ROOT/bot.env"
 
