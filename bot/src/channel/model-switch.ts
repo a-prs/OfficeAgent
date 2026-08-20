@@ -438,7 +438,20 @@ export class ModelSwitch implements ModelSwitchLike {
       innerCmd = `claude --continue ${MASTER_FLAGS}`
     }
 
-    const args = [...targetSocketArgs, 'respawn-pane', '-k', '-t', paneTarget, innerCmd]
+    // innerCmd often starts with inline env assignments (`ANTHROPIC_BASE_URL=...
+    // claude ...` or, for topics, `CHAT_ID=... bash entrypoint.sh`) -- that
+    // syntax only means anything to a real shell. Handing the raw string to
+    // tmux as the pane command does NOT go through a shell: tmux execs the
+    // first whitespace-separated token directly, which is the literal
+    // string "ANTHROPIC_BASE_URL=..." -- not a real binary -- so the exec
+    // fails immediately, the pane closes, and (being the only pane) the
+    // whole tmux server exits with it. Reproduced live (2026-08-20): every
+    // switch to the alt provider killed the entire officeagent-bot.service,
+    // which systemd then restarted from scratch on the primary provider --
+    // looked like "GLM switch does nothing" but was actually "GLM switch
+    // takes the whole bot down". Explicitly routing through `sh -c` fixes
+    // it for every branch above, including the ones with no env prefix.
+    const args = [...targetSocketArgs, 'respawn-pane', '-k', '-t', paneTarget, 'sh', '-c', innerCmd]
 
     try {
       await execFileAsync('tmux', args, { timeout: 10_000 })
