@@ -1,28 +1,42 @@
 // Out-of-band (OOB) commands handled by the plugin BEFORE a channel
 // notification is sent to Claude. Mirrors gateway.py:_OOB_COMMANDS +
-// _handle_oob_command + handle_command (status/help/reset/new branches).
+// _handle_oob_command + handle_command (status/reset/new branches).
 //
-// Scope A commands: /help, /status, /stop, /reset, /new.
+// Commands: /status, /stop, /reset, /restart, /model, /tutorial.
 // Explicitly NOT included: /compact, /halt (Scope B per PLAN.md T10).
+//
+// /help removed (2026-08-20, owner) — /tutorial's button menu
+// (content/tutorial.yaml) replaced it as the "what can this bot do"
+// entry point. `/help` is no longer a KNOWN_COMMANDS member, so it falls
+// through to Claude Code's own native slash-command handling instead of
+// this plugin's OOB layer (picked over a custom "use /tutorial" redirect
+// reply: Claude Code already has a real, useful native /help, no reason
+// to shadow it with a worse one just to bounce the user elsewhere).
 //
 // Parsing rules (gateway.py:3037-3046 + 3366-3370):
 //   - Must start with `/`.
 //   - Optional `@botname` suffix is stripped when it matches our bot's
 //     username (case-insensitive).
 //   - Command word is lowercased.
-//   - Trailing `force` token in args sets hasForceFlag (for /reset force,
-//     /new force).
+//   - Trailing `force` token in args sets hasForceFlag (/reset force only
+//     now — /restart never needed it, see below).
 //
 // Handling notes:
-//   - /help and /status reply directly to Telegram and DO NOT wake Claude
-//     (no channel notification). Status is a snapshot of plugin-side state
-//     only — Claude session lives in the host process and we don't poke it.
-//   - /stop, /reset force, /new force ack the user AND emit a channel
+//   - /status replies directly to Telegram and does NOT wake Claude (no
+//     channel notification) — a snapshot of plugin-side state only.
+//   - /stop, /reset force, /restart ack the user AND emit a channel
 //     notification with meta.command=<name>. The plugin can't truly
-//     interrupt Claude (no public API for that yet); /help documents this
-//     limitation.
-//   - /reset and /new without `force` return a short reply asking for the
-//     flag, no channel notification.
+//     interrupt Claude (no public API for that yet).
+//   - /reset without `force` returns a short reply asking for the flag, no
+//     channel notification — /restart has NO such gate (owner, 2026-08-20:
+//     the old /new force type-it-twice flow was pure friction for what's
+//     meant to be a simple "restart the session" action) — one command,
+//     immediate, no confirmation round-trip. Historically this plugin had
+//     both /reset force and /new force doing near-identical things (same
+//     user-facing outcome, distinguished only by which command string
+//     Claude itself saw) — /restart now covers the "start fresh" case
+//     /new used to; /reset stays as its own distinct, still-confirmed path
+//     for anyone who explicitly wants it.
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -50,14 +64,13 @@ async function topicPaneIsAlive(paneTarget: string): Promise<boolean> {
   }
 }
 
-export type OobCommandName = 'help' | 'status' | 'stop' | 'reset' | 'new' | 'model' | 'tutorial'
+export type OobCommandName = 'status' | 'stop' | 'reset' | 'restart' | 'model' | 'tutorial'
 
 const KNOWN_COMMANDS = new Set<OobCommandName>([
-  'help',
   'status',
   'stop',
   'reset',
-  'new',
+  'restart',
   'model',
   'tutorial',
 ])
@@ -171,26 +184,6 @@ export interface OobResult {
   pendingModelSwitch?: ModelTarget
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// /help text. Lists ONLY Scope A commands. Do not add /compact, /halt
-// here — they belong to Scope B and grep checks enforce their absence.
-// ─────────────────────────────────────────────────────────────────────
-
-function helpText(): string {
-  return (
-    '<b>команды</b>\n\n'
-    + '<code>/help</code> — эта справка\n'
-    + '<code>/status</code> — снимок плагина и сессии\n'
-    + '<code>/stop</code> — попросить Claude остановить текущую задачу\n'
-    + '<code>/reset force</code> — сбросить состояние сессии (подтверди флагом <code>force</code>)\n'
-    + '<code>/new force</code> — начать новую сессию (подтверди флагом <code>force</code>)\n'
-    + '<code>/model alt|primary</code> — переключить модель сессии (контекст сохраняется через --continue)\n'
-    + '<code>/tutorial</code> — обзор возможностей бота (кнопки)\n\n'
-    + '<i>примечание: /stop — best-effort: плагин передаёт сигнал остановки через '
-    + 'канал, но не может гарантировать прерывание посреди вызова инструмента.</i>'
-  )
-}
-
 // Public so server.ts can feed the SAME list to bot.api.setMyCommands and
 // Telegram autocomplete stays in sync with what the parser actually accepts.
 export interface BotCommandSpec {
@@ -198,11 +191,10 @@ export interface BotCommandSpec {
   description: string
 }
 export const BOT_COMMANDS: ReadonlyArray<BotCommandSpec> = [
-  { command: 'help', description: 'справка по командам' },
   { command: 'status', description: 'снимок плагина и сессии' },
   { command: 'stop', description: 'попросить Claude остановиться' },
   { command: 'reset', description: 'сбросить сессию (нужен force)' },
-  { command: 'new', description: 'начать новую сессию (нужен force)' },
+  { command: 'restart', description: 'перезапустить сессию (сразу, без подтверждения)' },
   { command: 'model', description: 'переключить модель сессии: alt | primary' },
   { command: 'tutorial', description: 'обзор возможностей бота' },
 ]
@@ -266,15 +258,6 @@ export async function handleOobCommand(
   }
 
   switch (parsed.name) {
-    case 'help': {
-      ctx.log.info('oob /help', { chat_id: ctx.chatId })
-      return {
-        handled: true,
-        command: 'help',
-        replyToTelegram: { text: helpText(), parseMode: 'HTML' },
-      }
-    }
-
     case 'status': {
       ctx.log.info('oob /status', { chat_id: ctx.chatId })
       return {
@@ -337,23 +320,20 @@ export async function handleOobCommand(
       }
     }
 
-    case 'new': {
-      if (!parsed.hasForceFlag) {
-        return {
-          handled: true,
-          command: 'new',
-          replyToTelegram: {
-            text: 'Для подтверждения добавь <code>force</code>: <code>/new force</code>',
-            parseMode: 'HTML',
-          },
-        }
-      }
-      ctx.log.info('oob /new force', { chat_id: ctx.chatId })
+    // Immediate, no-confirmation restart (owner, 2026-08-20: the old /new
+    // force / /reset force type-it-twice confirmation was pure friction —
+    // "restart" is exactly what /new force already did under the hood, just
+    // gated behind a flag nobody wanted to remember). One command, one tap
+    // worth of typing, done. /reset force is untouched and still available
+    // separately for anyone who explicitly wants the more cautious,
+    // confirmation-gated reset path instead of a restart.
+    case 'restart': {
+      ctx.log.info('oob /restart', { chat_id: ctx.chatId })
       return {
         handled: true,
-        command: 'new',
+        command: 'restart',
         replyToTelegram: {
-          text: '<b>новая сессия</b>\n\nследующее сообщение начнёт новую сессию',
+          text: '<b>перезапускаю сессию</b>\n\nследующее сообщение начнёт новую сессию',
           parseMode: 'HTML',
         },
         notifyChannel: { content: '/new force', meta: baseMeta },

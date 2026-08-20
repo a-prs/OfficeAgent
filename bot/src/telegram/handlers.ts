@@ -1144,7 +1144,7 @@ export async function handleInboundText(ctx: Context, deps: HandlerDeps): Promis
   //
   // Topic exception (2026-07-30, per Андрей's explicit ask — see
   // core/hot/handoff.md): only `/model` is exposed from inside a topic.
-  // Every other OOB command name (`/help`/`/status`/`/stop`/`/reset`/`/new`)
+  // Every other OOB command name (`/status`/`/stop`/`/reset`/`/restart`/`/tutorial`)
   // references MASTER-pane-only plumbing (ctx.statusManager controls the
   // master pane specifically) — those keep
   // falling through to gateAndNotify unchanged, i.e. behave exactly as

@@ -23,13 +23,14 @@ sections:
     menu_title: "⚙️ Команды"
     title: "Команды"
     body: |
-      <code>/help</code> — короткая справка по командам
       <code>/status</code> — снимок состояния бота и сессии
       <code>/stop</code> — попросить остановить текущую задачу
-      <code>/reset force</code> — сбросить состояние сессии
-      <code>/new force</code> — начать новую сессию с нуля
+      <code>/restart</code> — перезапустить сессию (сразу, без подтверждения)
+      <code>/reset force</code> — отдельный, более осторожный сброс состояния сессии
       <code>/model alt|primary</code> — переключить модель (можно и кнопками, без аргумента)
       <code>/tutorial</code> — это меню
+
+      Отдельной команды <code>/help</code> больше нет — это меню её заменяет.
 
   - key: usage
     menu_title: "💬 Как писать боту"

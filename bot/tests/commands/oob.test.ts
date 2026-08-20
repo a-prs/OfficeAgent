@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   handleOobCommand,
   parseOobCommand,
+  BOT_COMMANDS,
   type OobContext,
 } from '../../src/commands/oob.js'
 import type { AppConfig } from '../../src/config.js'
@@ -114,12 +115,8 @@ describe('parseOobCommand', () => {
     expect(parseOobCommand('not a command')).toBeNull()
   })
 
-  test('parses /help', () => {
-    const r = parseOobCommand('/help')
-    expect(r).not.toBeNull()
-    expect(r!.name).toBe('help')
-    expect(r!.args).toBe('')
-    expect(r!.hasForceFlag).toBe(false)
+  test('/help is no longer an OOB command (falls through to Claude Code native)', () => {
+    expect(parseOobCommand('/help')).toBeNull()
   })
 
   test('parses /status@botname strips suffix', () => {
@@ -136,10 +133,16 @@ describe('parseOobCommand', () => {
     expect(r!.hasForceFlag).toBe(true)
   })
 
-  test('parses /new without force has hasForceFlag=false', () => {
-    const r = parseOobCommand('/new')
+  test('/new is no longer an OOB command (superseded by /restart)', () => {
+    expect(parseOobCommand('/new')).toBeNull()
+    expect(parseOobCommand('/new force')).toBeNull()
+  })
+
+  test('parses /restart with no args, hasForceFlag=false (no confirmation needed)', () => {
+    const r = parseOobCommand('/restart')
     expect(r).not.toBeNull()
-    expect(r!.name).toBe('new')
+    expect(r!.name).toBe('restart')
+    expect(r!.args).toBe('')
     expect(r!.hasForceFlag).toBe(false)
   })
 
@@ -161,26 +164,6 @@ describe('parseOobCommand', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('handleOobCommand', () => {
-  test('/help returns HTML reply listing commands, no channel notify', async () => {
-    const parsed = parseOobCommand('/help')!
-    const result = await handleOobCommand(parsed, makeCtx())
-    expect(result.handled).toBe(true)
-    expect(result.command).toBe('help')
-    expect(result.notifyChannel).toBeUndefined()
-    expect(result.replyToTelegram).toBeDefined()
-    const text = result.replyToTelegram!.text
-    expect(result.replyToTelegram!.parseMode).toBe('HTML')
-    // Lists all 5 Scope A commands.
-    expect(text).toContain('/help')
-    expect(text).toContain('/status')
-    expect(text).toContain('/stop')
-    expect(text).toContain('/reset')
-    expect(text).toContain('/new')
-    // Scope B commands explicitly absent.
-    expect(text).not.toContain('/compact')
-    expect(text).not.toContain('/halt')
-  })
-
   test('/status includes bot_id state_dir allowed_user', async () => {
     const parsed = parseOobCommand('/status')!
     const result = await handleOobCommand(
@@ -247,19 +230,15 @@ describe('handleOobCommand', () => {
     expect(result.replyToTelegram!.text).toContain('force')
   })
 
-  test('/new force emits channel notification meta.command=new', async () => {
-    const parsed = parseOobCommand('/new force')!
+  test('/restart emits channel notification immediately, meta.command=restart, no confirmation gate', async () => {
+    const parsed = parseOobCommand('/restart')!
     const result = await handleOobCommand(parsed, makeCtx())
-    expect(result.command).toBe('new')
+    expect(result.command).toBe('restart')
     expect(result.notifyChannel).toBeDefined()
-    expect(result.notifyChannel!.meta.command).toBe('new')
-  })
-
-  test('/new (no force) returns reply asking for force flag, no channel notify', async () => {
-    const parsed = parseOobCommand('/new')!
-    const result = await handleOobCommand(parsed, makeCtx())
-    expect(result.notifyChannel).toBeUndefined()
-    expect(result.replyToTelegram!.text).toContain('force')
+    expect(result.notifyChannel!.meta.command).toBe('restart')
+    expect(result.notifyChannel!.content).toBe('/new force')
+    expect(result.replyToTelegram).toBeDefined()
+    expect(result.replyToTelegram!.text).toContain('перезапускаю')
   })
 })
 
@@ -503,9 +482,8 @@ describe('/tutorial', () => {
     }
   })
 
-  test('/help lists /tutorial too', async () => {
-    const parsed = parseOobCommand('/help')!
-    const result = await handleOobCommand(parsed, makeCtx())
-    expect(result.replyToTelegram!.text).toContain('/tutorial')
+  test('/tutorial replaced /help — BOT_COMMANDS has no help entry, has tutorial', () => {
+    expect(BOT_COMMANDS.some((c) => c.command === 'help')).toBe(false)
+    expect(BOT_COMMANDS.some((c) => c.command === 'tutorial')).toBe(true)
   })
 })
