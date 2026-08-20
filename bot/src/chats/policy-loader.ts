@@ -158,7 +158,39 @@ export function loadPolicyFromPath(absolutePath: string): MultichatPolicy {
   // and any of which could be a vector for prototype pollution or type
   // confusion if policy.yaml is ever influenced by an attacker.
   const parsed = parseYaml(raw, { schema: JSON_SCHEMA })
+  correctGroupChatModes(parsed)
   return MultichatPolicySchema.parse(parsed)
+}
+
+// A Telegram group/supergroup/channel chat id is always negative; a private
+// (one-on-one DM) chat id is always positive -- this is a wire-protocol
+// invariant, not a policy choice (see getChatPolicy's doc comment above).
+// `mode: private` on a negative-id entry is therefore never a legitimate
+// configuration -- only ever a mistake. Found live (2026-08-20): the bot's
+// own runtime self-edit of policy.yaml (activating a supergroup on request)
+// copied the owner's DM entry as a template and left `mode: private`
+// uncorrected, which silently disabled the group typing indicator (M7 in
+// multichat-router.ts gates entirely on `mode === 'public'`) with no error
+// anywhere -- looked like "streaming just doesn't work in groups" until
+// traced back to this one field. Auto-correct rather than only warn: there
+// is no code path where the "wrong" value could ever be intentional.
+function correctGroupChatModes(parsed: unknown): void {
+  if (typeof parsed !== 'object' || parsed === null) return
+  const chats = (parsed as { chats?: unknown }).chats
+  if (typeof chats !== 'object' || chats === null) return
+  for (const [chatId, entry] of Object.entries(chats as Record<string, unknown>)) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const chatEntry = entry as { mode?: unknown }
+    if (chatId.startsWith('-') && chatEntry.mode === 'private') {
+      chatEntry.mode = 'public'
+      // eslint-disable-next-line no-console -- startup-time correctness
+      // fix, no logger threaded through this pure loader function.
+      console.warn(
+        `policy-loader: chat ${chatId} had mode: private on a group-shaped `
+        + `(negative) chat id -- corrected to mode: public`,
+      )
+    }
+  }
 }
 
 /**
