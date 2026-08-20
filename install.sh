@@ -147,10 +147,27 @@ chown officeagent:officeagent /home/officeagent/.claude
 step "4/7 configuration"
 read -rp "Telegram bot token (from @BotFather): " TELEGRAM_BOT_TOKEN
 read -rp "Your Telegram numeric user id (from @userinfobot): " OWNER_TELEGRAM_USER_ID
-read -rp "Claude auth -- paste ANTHROPIC_API_KEY, or leave empty to use CLAUDE_CODE_OAUTH_TOKEN instead: " ANTHROPIC_API_KEY
+read -rp "Claude auth -- paste ANTHROPIC_API_KEY, or leave empty to log in with your Claude subscription: " ANTHROPIC_API_KEY
 CLAUDE_CODE_OAUTH_TOKEN=""
 if [ -z "$ANTHROPIC_API_KEY" ]; then
-  read -rp "  CLAUDE_CODE_OAUTH_TOKEN (Claude subscription OAuth token): " CLAUDE_CODE_OAUTH_TOKEN
+  read -rp "  Already have a CLAUDE_CODE_OAUTH_TOKEN? [y/N]: " HAVE_TOKEN
+  if [[ "$HAVE_TOKEN" =~ ^[Yy]$ ]]; then
+    read -rp "  Paste it: " CLAUDE_CODE_OAUTH_TOKEN
+  else
+    # Generate it right here instead of sending the operator off to install
+    # Claude Code on a second machine -- `claude` is already on this box
+    # from step 2 above. `claude setup-token` prints a login link (open on
+    # any device with a browser -- a phone is fine); if the browser can't
+    # redirect back (common over SSH) it shows a short code to paste below.
+    # (owner: "нам нужно авторизовать Claude без запуска клода [где-то ещё]", 2026-08-20)
+    echo
+    echo ">>> Opening Claude subscription login. Open the link below on any device"
+    echo ">>> with a browser, approve access, and paste back any code it asks for."
+    echo
+    claude setup-token || true
+    echo
+    read -rp "  Paste the token 'claude setup-token' printed above: " CLAUDE_CODE_OAUTH_TOKEN
+  fi
 fi
 read -rp "Full-text search language [russian/english/simple] (default english): " FTS_LANGUAGE
 FTS_LANGUAGE="${FTS_LANGUAGE:-english}"

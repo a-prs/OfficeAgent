@@ -114,6 +114,16 @@ async def lifespan(_app: Starlette):
         await stack.enter_async_context(swarm_server.lifespan(swarm_server.mcp))
         await stack.enter_async_context(task_server.lifespan(task_server.mcp))
 
+        # Same reasoning, one level deeper: `server_module.mcp.http_app()`
+        # returns FastMCP's OWN ASGI app (a Starlette instance), which has
+        # its OWN lifespan that spins up StreamableHTTPSessionManager's task
+        # group -- distinct from the module's custom lifespan() above, and
+        # equally unreached by Mount(). Skipping it crashes every request
+        # with "StreamableHTTPSessionManager task group was not initialized"
+        # (found live: 2026-08-20, fresh install, first end-to-end run).
+        for inner_app in _MOUNTED_INNER_APPS:
+            await stack.enter_async_context(inner_app.lifespan(inner_app))
+
         logger.info("officeagent-gbrain: starting background workers")
         worker_tasks = [
             asyncio.create_task(
@@ -147,12 +157,17 @@ async def lifespan(_app: Starlette):
             logger.info("officeagent-gbrain: shutdown complete")
 
 
+_MOUNTED_INNER_APPS: list = []
+
+
 def _mounted_app(server_module) -> object:
     """Build the ASGI app for one MCP sub-module: FastMCP's streamable-http
     app wrapped in that module's own AuthCaptureMiddleware, exactly as it
-    would run standalone.
+    would run standalone. The unwrapped inner app is stashed in
+    _MOUNTED_INNER_APPS so lifespan() above can also drive its lifespan.
     """
     inner = server_module.mcp.http_app(transport="streamable-http")
+    _MOUNTED_INNER_APPS.append(inner)
     return server_module.AuthCaptureMiddleware(inner)
 
 
