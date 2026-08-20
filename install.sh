@@ -359,7 +359,7 @@ mention_allowlist: []
 chats:
   "${OWNER_TELEGRAM_USER_ID}":
     mode: private
-    streaming: off
+    streaming: progress
     edit_message_progress: false
     delivery: final_only
     persona_file: persona.md
@@ -373,7 +373,7 @@ if [ -n "$OWNER_SUPERGROUP_CHAT_ID" ]; then
   cat >> "$WORKSPACES_ROOT/chats/policy.yaml" <<EOF
   "${OWNER_SUPERGROUP_CHAT_ID}":
     mode: public
-    streaming: off
+    streaming: progress
     edit_message_progress: false
     delivery: final_only
     persona_file: persona.md
