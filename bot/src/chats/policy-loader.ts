@@ -335,14 +335,31 @@ export function assertValidChatId(chatId: string): void {
  * @param chatId stringified Telegram chat id (validated)
  * @returns the chat's policy entry, or `null` when not configured
  */
+// Topic chat ids are composite (`<baseChatId>_t<threadId>`), but
+// policy.yaml only ever declares an entry for the BASE chat (install.sh
+// writes one entry per supergroup, not one per topic -- topics aren't
+// known in advance). Every per-chat policy lookup must therefore fall
+// back to the base id when the exact composite key isn't declared, or
+// every topic silently fails closed on every chat-scoped check. Fixed
+// live (2026-08-21): found via chatIdAllowed's own precedent (this same
+// base-id-stripping pattern, webhook/server.ts's permission/request
+// handler) already existing elsewhere in this codebase -- these two
+// lookups were the ones still missing it, so status-card activity for
+// topics passed auth but was then silently dropped here.
+function chatPolicyEntry(policy: MultichatPolicy, chatId: string): ChatPolicy | undefined {
+  const exact = policy.chats[chatId]
+  if (exact !== undefined) return exact
+  const baseChatId = chatId.replace(/_t\d+$/, '')
+  return baseChatId === chatId ? undefined : policy.chats[baseChatId]
+}
+
 export function getChatPolicyOrDeny(
   policy: MultichatPolicy | null,
   chatId: string,
 ): ChatPolicy | null {
   assertValidChatId(chatId)
   if (policy === null) return null
-  const entry = policy.chats[chatId]
-  return entry ?? null
+  return chatPolicyEntry(policy, chatId) ?? null
 }
 
 /**
@@ -373,7 +390,7 @@ export function shouldStreamForChat(
 ): boolean {
   assertValidChatId(chatId)
   if (policy === null) return true
-  const entry = policy.chats[chatId]
+  const entry = chatPolicyEntry(policy, chatId)
   if (entry === undefined) return false
   return entry.streaming === 'progress'
 }

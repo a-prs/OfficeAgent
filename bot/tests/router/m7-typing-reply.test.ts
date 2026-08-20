@@ -250,8 +250,10 @@ describe('M7 — reply-on-mention (public chats)', () => {
 })
 
 describe('M7 — typing indicator', () => {
-  test('public dispatch sends sendChatAction("typing")', async () => {
-    const router = makeRouter(makePolicy({ [GROUP]: makeChatPolicy({ mode: 'public' }) }))
+  test('public dispatch (streaming off) sends sendChatAction("typing")', async () => {
+    const router = makeRouter(
+      makePolicy({ [GROUP]: makeChatPolicy({ mode: 'public', streaming: 'off' }) }),
+    )
     await router.start()
     await router.dispatch(inbound({ message_id: '555' }))
     await sleep(50)
@@ -261,6 +263,25 @@ describe('M7 — typing indicator', () => {
       (a) => a.chatId === GROUP && a.action === 'typing',
     )
     expect(typing.length).toBeGreaterThanOrEqual(1)
+  }, 5_000)
+
+  // 2026-08-21: streaming: 'progress' chats get their typing indication
+  // from the rich status card's own internal pulse (statusManager's
+  // chatActionTick) instead -- the plain M7 loop must stay silent so the
+  // two mechanisms don't double-send the same action on separate timers.
+  test('public dispatch (streaming progress) skips the plain pulse', async () => {
+    const router = makeRouter(
+      makePolicy({ [GROUP]: makeChatPolicy({ mode: 'public', streaming: 'progress' }) }),
+    )
+    await router.start()
+    await router.dispatch(inbound({ message_id: '555' }))
+    await sleep(50)
+    await router.stop()
+
+    const typing = fx.telegram.actions.filter(
+      (a) => a.chatId === GROUP && a.action === 'typing',
+    )
+    expect(typing.length).toBe(0)
   }, 5_000)
 
   test('private dispatch sends NO typing action', async () => {
