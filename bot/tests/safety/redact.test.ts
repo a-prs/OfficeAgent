@@ -133,11 +133,11 @@ describe('redactSecrets — Firebase service-account JSON', () => {
   })
 
   test('masks client_email value', () => {
-    const json = '{"client_email":"sa-agent-c@orgrimmar.iam.gserviceaccount.com"}'
+    const json = '{"client_email":"sa-agent-c@example.iam.gserviceaccount.com"}'
     const out = redactSecrets(json)
     expect(out).toContain('"client_email"')
     expect(out).toContain('"[REDACTED]"')
-    expect(out).not.toContain('sa-agent-c@orgrimmar')
+    expect(out).not.toContain('sa-agent-c@example')
   })
 })
 

@@ -1,4 +1,4 @@
-// InboundWatcher — auto-reply «Тралл занят» when the owner sends plain
+// InboundWatcher — auto-reply «Бот занят» when the owner sends plain
 // text while a Claude session is mid-tool. Sits between OOB resolution and
 // the gate/notify call in `handleInboundText` — OOB always takes priority,
 // and the watcher NEVER replaces the channel notification (auto-reply AND
@@ -16,7 +16,7 @@
 //
 // Tone constraints (rules.md):
 //   * No emoji in production paths. The owner explicitly asked for «🔧»
-//     prefix on auto-reply (visual cue that Тралл is mid-tool — single
+//     prefix on auto-reply (visual cue that the bot is mid-tool — single
 //     character, anchored, NOT a decorative emoji string).
 //   * HTML output through `escapeHtml` for the tool name; the safe-wrapper
 //     also validates HTML before send.
@@ -163,5 +163,5 @@ export class InboundWatcher {
  */
 export function composeAutoReply(toolName: string | undefined): string {
   const tool = toolName ?? '…'
-  return `🔧 Тралл занят, активный инструмент: <code>${escapeHtml(tool)}</code>. Жди или /stop.`
+  return `🔧 Бот занят, активный инструмент: <code>${escapeHtml(tool)}</code>. Жди или /stop.`
 }

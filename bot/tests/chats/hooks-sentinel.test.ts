@@ -226,7 +226,7 @@ describe('session-start.sh — degraded-mode warning (Opus #16)', () => {
     mkdirSync(join(workspace, 'chats', '164795011'), { recursive: true })
     writeFileSync(
       join(workspace, 'chats', '164795011', 'persona.md'),
-      'Ты Тралл, архитектор Оргриммара.',
+      'Ты вежливый ассистент службы поддержки.',
       'utf8',
     )
     const r = run(SESSION_HOOK, {
@@ -240,7 +240,7 @@ describe('session-start.sh — degraded-mode warning (Opus #16)', () => {
     const payload = JSON.parse(r.stdout)
     const ctx = payload.hookSpecificOutput?.additionalContext ?? ''
     // Persona is loaded as-is; degraded marker must not appear.
-    expect(ctx).toContain('Тралл')
+    expect(ctx).toContain('вежливый ассистент')
     expect(ctx).not.toContain('degraded mode')
     expect(ctx).not.toContain('Persona file missing')
   })

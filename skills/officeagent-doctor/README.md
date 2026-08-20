@@ -179,7 +179,7 @@ applying this to a live agent requires the prince's/operator's approval. Target 
 
 ```markdown
 **Shared gbrain memory:**
-- gbrain is the shared long-term memory for Orgrimmar agents.
+- gbrain is the shared long-term memory for OfficeAgent's agents.
 - Use it when continuity matters across sessions, agents, or machines.
 - Before non-trivial work, consider recall for prior decisions, runbooks, failures, and handoffs.
 - When you discover durable facts, decisions, fixes, or reusable procedures, consider saving a concise note.

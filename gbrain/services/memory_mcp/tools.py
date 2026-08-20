@@ -159,7 +159,7 @@ async def _authenticate_for_slots(
     """Authenticate the slot tool caller (Bearer or Hermes HMAC).
 
     Routes through :func:`_authenticate_request` so HMAC-authenticated
-    agents (e.g. Tyrande) reach slot tools end-to-end, not only the
+    agents (e.g. agent-g) reach slot tools end-to-end, not only the
     middleware. No silent fallback — missing/invalid auth raises
     ``PermissionError``.
     """

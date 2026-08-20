@@ -8,7 +8,7 @@ Missing gateway URL for an agent → mark_retry (operator can configure later).
 Per-agent outbound auth (extension 2026-05-17, Hermes integration):
 - ``AGENT_GATEWAYS`` remains the existing JSON map ``{agent: url}``.
 - Optional ``AGENT_GATEWAY_AUTH`` JSON map selects auth mode per agent:
-  ``{"agent-g": "hmac:env:TYRANDE_WEBHOOK_HMAC",
+  ``{"agent-g": "hmac:env:AGENT_G_WEBHOOK_HMAC",
      "claude":  "bearer:env:GATEWAY_WEBHOOK_TOKEN"}``.
   Spec ``<mode>:env:<ENV_VAR_NAME>`` resolves the secret from the named env var
   at load time. Raw secrets must never be embedded in ``AGENT_GATEWAY_AUTH``

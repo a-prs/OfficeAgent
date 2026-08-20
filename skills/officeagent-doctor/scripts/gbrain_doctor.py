@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gbrain-doctor — agent-facing diagnostic CLI for an Orgrimmar agent's gbrain setup.
+"""gbrain-doctor — agent-facing diagnostic CLI for an OfficeAgent agent's gbrain setup.
 
 Runs grouped read-only checks (MCP connectivity/identity, swarm, recall,
 memory, hooks parity, webhooks, topology/security, GitHub repo, skill install)
@@ -490,7 +490,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gbrain-doctor",
         description=(
-            "Agent-facing diagnostic for an Orgrimmar agent's gbrain MCP "
+            "Agent-facing diagnostic for an OfficeAgent agent's gbrain MCP "
             "setup: connectivity, identity, recall, swarm, hooks parity, "
             "webhooks, topology, GitHub repo, and skill install."
         ),

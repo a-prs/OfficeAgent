@@ -49,7 +49,7 @@ describe('extractLeadingTelegramChatId (FIX 2 + FIX 7)', () => {
     ).toBe('-1003784643974')
   })
   test('ignores a leading non-telegram channel block', () => {
-    expect(extractLeadingTelegramChatId('<channel source="orgrimmar-inbox" from="sa-silvana">x</channel>')).toBeUndefined()
+    expect(extractLeadingTelegramChatId('<channel source="swarm-inbox" from="sa-agent-c">x</channel>')).toBeUndefined()
   })
   test('undefined when text does not start with a channel envelope', () => {
     expect(extractLeadingTelegramChatId('plain user text')).toBeUndefined()

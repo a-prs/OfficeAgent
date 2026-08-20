@@ -35,7 +35,7 @@ import { dirname, join } from 'path'
 // ─────────────────────────────────────────────────────────────────────
 // Channel-block parsing. Tolerant of BOTH the JSON-escaped form found in a
 // transcript line (`message_id=\"28045\"`) and the raw form. Only telegram
-// blocks are matched — orgrimmar-inbox events carry no Telegram message_id.
+// blocks are matched — swarm-inbox events carry no Telegram message_id.
 // ─────────────────────────────────────────────────────────────────────
 
 export interface ReadReceiptRef {

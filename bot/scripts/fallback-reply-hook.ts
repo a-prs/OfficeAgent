@@ -135,7 +135,7 @@ export interface TurnResult {
  * we read ONLY the leading tag.
  *
  * Tolerant of both the JSON-escaped transcript form (`chat_id=\"<id>\"`)
- * and the raw form. Only telegram envelopes match (orgrimmar-inbox events carry
+ * and the raw form. Only telegram envelopes match (swarm-inbox events carry
  * no telegram source). Returns undefined when the trimmed text does NOT start
  * with a telegram channel envelope → no trusted destination → no forward.
  *

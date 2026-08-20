@@ -184,12 +184,12 @@ describe('renderMediaDescriptor', () => {
       kind: 'sticker',
       fileId: 'sF',
       emoji: '🔥',
-      setName: 'orgrimmar_pack',
+      setName: 'stickers_pack',
       size: 4096,
     }
     const out = renderMediaDescriptor(md)
     expect(out).toBe(
-      '<media kind="sticker" file_id="sF" emoji="🔥" set_name="orgrimmar_pack" size="4096" />',
+      '<media kind="sticker" file_id="sF" emoji="🔥" set_name="stickers_pack" size="4096" />',
     )
   })
 

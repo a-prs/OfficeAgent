@@ -37,8 +37,8 @@ describe('parseChannelRefs', () => {
     expect(parseChannelRefs(text)).toEqual([{ chat_id: '-1003784643974', message_id: 42 }])
   })
 
-  test('ignores non-telegram channel blocks (orgrimmar-inbox)', () => {
-    const text = '<channel source="orgrimmar-inbox" from="sa-silvana" type="task">body</channel>'
+  test('ignores non-telegram channel blocks (swarm-inbox)', () => {
+    const text = '<channel source="swarm-inbox" from="sa-agent-c" type="task">body</channel>'
     expect(parseChannelRefs(text)).toEqual([])
   })
 

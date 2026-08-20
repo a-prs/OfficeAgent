@@ -185,12 +185,12 @@ def test_load_gateway_auth_empty_when_unset(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_load_gateway_auth_parses_bearer_and_hmac(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TYRANDE_HMAC", "raw-hmac-secret")
+    monkeypatch.setenv("AGENT_G_HMAC", "raw-hmac-secret")
     monkeypatch.setenv("CLAUDE_BEARER", "raw-bearer-token")
     monkeypatch.setenv(
         "AGENT_GATEWAY_AUTH",
         json.dumps({
-            "agent-g": "hmac:env:TYRANDE_HMAC",
+            "agent-g": "hmac:env:AGENT_G_HMAC",
             "claude": "bearer:env:CLAUDE_BEARER",
         }),
     )
@@ -204,11 +204,11 @@ def test_load_gateway_auth_parses_bearer_and_hmac(monkeypatch: pytest.MonkeyPatc
 
 def test_load_gateway_auth_env_secret_never_returns_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """The resolved GatewayAuth.value is the raw secret, never the env var name."""
-    monkeypatch.setenv("TYRANDE_HMAC", "actual-secret-bytes")
-    monkeypatch.setenv("AGENT_GATEWAY_AUTH", json.dumps({"agent-g": "hmac:env:TYRANDE_HMAC"}))
+    monkeypatch.setenv("AGENT_G_HMAC", "actual-secret-bytes")
+    monkeypatch.setenv("AGENT_GATEWAY_AUTH", json.dumps({"agent-g": "hmac:env:AGENT_G_HMAC"}))
     worker = _reload_worker(monkeypatch)
     auth = worker._load_gateway_auth()["agent-g"]
-    assert "TYRANDE_HMAC" not in auth.value
+    assert "AGENT_G_HMAC" not in auth.value
     assert auth.value == "actual-secret-bytes"
 
 
@@ -313,8 +313,8 @@ def test_worker_selects_bearer_when_no_hmac_config(monkeypatch: pytest.MonkeyPat
 
 
 def test_worker_signs_with_hmac_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TYRANDE_HMAC", "agent-g-secret-bytes")
-    monkeypatch.setenv("AGENT_GATEWAY_AUTH", json.dumps({"agent-g": "hmac:env:TYRANDE_HMAC"}))
+    monkeypatch.setenv("AGENT_G_HMAC", "agent-g-secret-bytes")
+    monkeypatch.setenv("AGENT_GATEWAY_AUTH", json.dumps({"agent-g": "hmac:env:AGENT_G_HMAC"}))
     monkeypatch.delenv("GATEWAY_WEBHOOK_TOKEN", raising=False)
     worker = _reload_worker(monkeypatch)
 
@@ -378,12 +378,12 @@ def test_worker_body_unchanged_between_sign_and_post(monkeypatch: pytest.MonkeyP
 
 def test_worker_mixed_bearer_and_hmac_in_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     """One iteration can deliver both auth modes correctly."""
-    monkeypatch.setenv("TYRANDE_HMAC", "agent-g-secret")
+    monkeypatch.setenv("AGENT_G_HMAC", "agent-g-secret")
     monkeypatch.setenv("CLAUDE_TOKEN", "claude-bearer")
     monkeypatch.setenv(
         "AGENT_GATEWAY_AUTH",
         json.dumps({
-            "agent-g": "hmac:env:TYRANDE_HMAC",
+            "agent-g": "hmac:env:AGENT_G_HMAC",
             "claude": "bearer:env:CLAUDE_TOKEN",
         }),
     )
