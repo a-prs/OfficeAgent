@@ -299,7 +299,11 @@ const DEFAULT_WATCHDOG_INTERVAL_MS = 60_000
 // compact, 2026-07-06). Generous enough for a session to summarise, write a
 // file, and run a full-transcript /compact; short enough that a stuck
 // session can't wedge the idle watchdog indefinitely.
-const BEFORE_KILL_TIMEOUT_MS = 300_000
+// Widened 2026-08-20 alongside GRACEFUL_DUMP_POLL_MS/COMPACT_POLL_MS
+// (multichat-router.ts): those two budgets alone now sum to 480s, so this
+// cap must stay above that with headroom, or it forcibly kills the pane
+// mid-write on the slow path this change exists to fix.
+const BEFORE_KILL_TIMEOUT_MS = 600_000
 
 /**
  * Manages the per-chat-id tmux session lifecycle.
