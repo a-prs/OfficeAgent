@@ -12,9 +12,10 @@
 # operator debugging a failed install should be able to read it top to
 # bottom and know exactly what ran.
 #
-# STATUS: written but NOT run end-to-end in this environment (no real
-# host to test against). Read before trusting it in production -- see
-# README.md "Status".
+# STATUS: verified end-to-end on a fresh Ubuntu VPS, driven through a real
+# tmux pty exactly like a human operator's terminal (2026-08-20) -- clean
+# install, all three services stable at 0 restarts, bot replied to a real
+# injected message on the GLM path. See README.md "Status".
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
