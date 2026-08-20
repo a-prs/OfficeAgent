@@ -387,7 +387,7 @@ EOF
 touch "$WORKSPACES_ROOT/chats/${OWNER_TELEGRAM_USER_ID}/handoff.md"
 chown -R officeagent:officeagent "$WORKSPACES_ROOT"
 
-rsync -a --delete "$REPO_ROOT/gbrain/" "$INSTALL_ROOT/gbrain/" --exclude .venv --exclude __pycache__
+rsync -a --delete "$REPO_ROOT/gbrain/" "$INSTALL_ROOT/gbrain/" --exclude .venv --exclude __pycache__ --exclude .model-cache
 rsync -a --delete "$REPO_ROOT/bot/" "$INSTALL_ROOT/bot/" --exclude node_modules --exclude /state
 rsync -a --delete "$REPO_ROOT/templates/" "$INSTALL_ROOT/templates/"
 rsync -a --delete "$REPO_ROOT/skills/" "$INSTALL_ROOT/skills/"
