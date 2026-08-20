@@ -33,6 +33,7 @@ import type {
 } from '../../src/channel/permissions.js'
 import type { TelegramApi } from '../../src/channel/tools.js'
 import type { BotIdentity } from '../../src/prompt/build.js'
+import type { ChatPolicy, MultichatPolicy } from '../../src/chats/policy-loader.js'
 
 const silentLog = createLogger('test', {
   stream: { write: () => true } as unknown as NodeJS.WritableStream,
@@ -79,6 +80,14 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     multichat: { enabled: false },
     ask_user_question: { enabled: false, timeout_ms: 300_000, max_preview_chars: 1000 },
     permission_gate: { enabled: false, timeout_ms: 120_000 },
+    // Pre-existing gap (missing here since before 2026-08-21): handleOobCommand's
+    // 'model' branch reads config.alt_provider.label unconditionally, so any
+    // test exercising /model crashed with "undefined is not an object" instead
+    // of testing what it meant to. Every /model-in-topic test was silently
+    // broken by this, which is how the real authorization bug fixed the same
+    // day (topic /model checking the DM-only allowlist) went uncaught by tests
+    // for as long as it did.
+    alt_provider: { enabled: false, token_env: 'ALT_PROVIDER_TOKEN', label: 'Alternative model' },
     ...overrides,
   }
 }
@@ -175,6 +184,34 @@ function makeTelegramApi(): {
   return { api, reactions }
 }
 
+// Minimal policy fixture for the topic /model authorization tests below —
+// only `allowlist.chats`/`allowlist.users` matter for that gate; the rest
+// of ChatPolicy is filled with harmless, unused-by-these-tests defaults.
+function makeChatPolicy(overrides: Partial<ChatPolicy> = {}): ChatPolicy {
+  return {
+    mode: 'public',
+    streaming: 'off',
+    tmux_mirror: false,
+    edit_message_progress: false,
+    delivery: 'streamed',
+    persona_file: 'persona.md',
+    handoff_file: 'handoff.md',
+    system_reminder: '',
+    idle_ttl_ms: 1_800_000,
+    max_queue_depth: 1,
+    ...overrides,
+  }
+}
+
+function makePolicy(chatId: string, userIds: string[]): MultichatPolicy {
+  return {
+    version: 1,
+    allowlist: { chats: [chatId], users: userIds },
+    mention_allowlist: [],
+    chats: { [chatId]: makeChatPolicy() },
+  }
+}
+
 function makeDeps(
   overrides: {
     config?: AppConfig
@@ -184,6 +221,7 @@ function makeDeps(
     watcher?: InboundWatcher
     askUserQuestionUi?: HandlerDeps['askUserQuestionUi']
     modelSwitch?: HandlerDeps['modelSwitch']
+    policy?: MultichatPolicy
   } = {},
 ): { deps: HandlerDeps; statePaths: StatePaths } {
   const config = overrides.config ?? makeConfig()
@@ -218,6 +256,7 @@ function makeDeps(
     ...(overrides.watcher ? { watcher: overrides.watcher } : {}),
     ...(overrides.askUserQuestionUi ? { askUserQuestionUi: overrides.askUserQuestionUi } : {}),
     ...(overrides.modelSwitch ? { modelSwitch: overrides.modelSwitch } : {}),
+    ...(overrides.policy ? { policy: overrides.policy } : {}),
   }
   return { deps, statePaths }
 }
@@ -386,20 +425,40 @@ describe('handleInboundText — OOB allowed_chat_ids gate (Fix 6)', () => {
     rmSync(statePaths.root, { recursive: true, force: true })
   })
 
-  test('allowed user in allowed chat: OOB still works (/help responds)', async () => {
+  test('allowed user in allowed chat: OOB still works (/status responds)', async () => {
     // Sanity: confirm the gate addition didn't accidentally block the happy
-    // path. /help is handled inline (no channel notify), so we expect zero
+    // path. /status is handled inline (no channel notify), so we expect zero
     // server calls AND no throw. Telegram api setMessageReaction isn't used.
+    // (/help itself is no longer an OOB command as of 2026-08-21 — it now
+    // falls through to Claude Code's own native /help; /status still is.)
     const config = makeConfig()
     const serverSpy = makeServerSpy()
     const tg = makeTelegramApi()
-    // /help replies via tg.sendMessage; allow it to no-op so the call doesn't
-    // throw through executeOobResult.
+    // /status replies via tg.sendMessage; allow it to no-op so the call
+    // doesn't throw through executeOobResult.
     const api: TelegramApi = {
       ...tg.api,
       sendMessage: async () => ({ message_id: 100 }),
     }
     const { deps, statePaths } = makeDeps({ config, server: serverSpy.server, telegramApi: api })
+    const ctx = makeCtx({
+      text: '/status',
+      chatId: 164795011,
+      chatType: 'private',
+      fromId: 164795011,
+    })
+
+    await handleInboundText(ctx, deps)
+
+    // OOB handled inline — no channel notify for /status.
+    expect(serverSpy.calls.length).toBe(0)
+    rmSync(statePaths.root, { recursive: true, force: true })
+  })
+
+  test('/help is no longer OOB — falls through to the normal channel forward (native Claude Code help)', async () => {
+    const config = makeConfig()
+    const serverSpy = makeServerSpy()
+    const { deps, statePaths } = makeDeps({ config, server: serverSpy.server })
     const ctx = makeCtx({
       text: '/help',
       chatId: 164795011,
@@ -409,18 +468,29 @@ describe('handleInboundText — OOB allowed_chat_ids gate (Fix 6)', () => {
 
     await handleInboundText(ctx, deps)
 
-    // OOB handled inline — no channel notify for /help.
-    expect(serverSpy.calls.length).toBe(0)
+    // Not intercepted -- reaches the normal channel notify path, same as
+    // any other message (2026-08-21: /help dropped from KNOWN_COMMANDS).
+    expect(serverSpy.calls.length).toBe(1)
     rmSync(statePaths.root, { recursive: true, force: true })
   })
 })
 
-describe('handleInboundText — /model reachable from inside a topic (2026-07-30)', () => {
+describe('handleInboundText — /model reachable from inside a topic (2026-07-30, re-authorized 2026-08-21)', () => {
+  // FIX (2026-08-21): the topic case authorizes against policy.allowlist
+  // now, not config.allowed_user_ids/allowed_chat_ids (the DM-only
+  // allowlist, which can never contain a group chat id — found live, every
+  // /model inside a topic silently fell through to plain-text forwarding
+  // instead of being intercepted). config.allowed_user_ids/allowed_chat_ids
+  // below are deliberately left NOT matching the topic's sender/chat in
+  // every test in this block, to prove the DM allowlist is no longer what
+  // gates this path.
+  const TOPIC_CHAT_ID = '-1009999'
+  const OWNER = '164795011'
+  const SECOND_USER = '5033460393'
+
   test('/model typed directly inside an allowed topic is intercepted (OOB), not forwarded', async () => {
-    const config = makeConfig({
-      allowed_user_ids: [164795011],
-      allowed_chat_ids: [-1009999],
-    })
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    const policy = makePolicy(TOPIC_CHAT_ID, [OWNER])
     const serverSpy = makeServerSpy()
     const tg = makeTelegramApi()
     const sent: Array<{ chatId: string; text: string }> = []
@@ -433,6 +503,7 @@ describe('handleInboundText — /model reachable from inside a topic (2026-07-30
     }
     const { deps, statePaths } = makeDeps({
       config,
+      policy,
       server: serverSpy.server,
       telegramApi: api,
       modelSwitch: { switchTo: async () => ({ ok: true }) },
@@ -458,17 +529,89 @@ describe('handleInboundText — /model reachable from inside a topic (2026-07-30
     rmSync(statePaths.root, { recursive: true, force: true })
   })
 
-  test('/help typed inside the same topic is NOT intercepted — falls through unchanged (only /model gets the topic exception)', async () => {
-    const config = makeConfig({
-      allowed_user_ids: [164795011],
-      allowed_chat_ids: [-1009999],
-    })
+  test('/model@<botusername> (Telegram group-autocomplete form) is intercepted the same as bare /model', async () => {
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    const policy = makePolicy(TOPIC_CHAT_ID, [OWNER])
     const serverSpy = makeServerSpy()
-    // No router/policy wired — a fall-through for a group/topic message
-    // hits gate.ts's legacy DM-only behaviour and is dropped, never calling
+    const tg = makeTelegramApi()
+    const sent: Array<{ chatId: string; text: string }> = []
+    const api: TelegramApi = {
+      ...tg.api,
+      sendMessage: async (chatId: string, text: string) => {
+        sent.push({ chatId, text })
+        return { message_id: 100 }
+      },
+    }
+    const { deps, statePaths } = makeDeps({
+      config,
+      policy,
+      server: serverSpy.server,
+      telegramApi: api,
+      modelSwitch: { switchTo: async () => ({ ok: true }) },
+    })
+    // makeDeps' bot identity (see its own body) uses username 'canarybot'.
+    const ctx = makeCtx({
+      text: '/model@canarybot',
+      chatId: -1009999,
+      chatType: 'supergroup',
+      fromId: 164795011,
+      messageThreadId: 555,
+    })
+
+    await handleInboundText(ctx, deps)
+
+    expect(serverSpy.calls.length).toBe(0)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.chatId).toBe('-1009999_t555')
+    expect(sent[0]!.text).toContain('выбери модель')
+    rmSync(statePaths.root, { recursive: true, force: true })
+  })
+
+  test('a second user present in policy.allowlist.users (not config.allowed_user_ids) is also intercepted', async () => {
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    const policy = makePolicy(TOPIC_CHAT_ID, [OWNER, SECOND_USER])
+    const serverSpy = makeServerSpy()
+    const tg = makeTelegramApi()
+    const sent: Array<{ chatId: string; text: string }> = []
+    const api: TelegramApi = {
+      ...tg.api,
+      sendMessage: async (chatId: string, text: string) => {
+        sent.push({ chatId, text })
+        return { message_id: 100 }
+      },
+    }
+    const { deps, statePaths } = makeDeps({
+      config,
+      policy,
+      server: serverSpy.server,
+      telegramApi: api,
+      modelSwitch: { switchTo: async () => ({ ok: true }) },
+    })
+    const ctx = makeCtx({
+      text: '/model',
+      chatId: -1009999,
+      chatType: 'supergroup',
+      fromId: 5033460393,
+      messageThreadId: 555,
+    })
+
+    await handleInboundText(ctx, deps)
+
+    expect(serverSpy.calls.length).toBe(0)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.chatId).toBe('-1009999_t555')
+    rmSync(statePaths.root, { recursive: true, force: true })
+  })
+
+  test('/help typed inside the same topic is NOT intercepted — falls through unchanged (only /model gets the topic exception)', async () => {
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    const policy = makePolicy(TOPIC_CHAT_ID, [OWNER])
+    const serverSpy = makeServerSpy()
+    // No router wired — a fall-through for a group/topic message hits
+    // gate.ts's legacy DM-only behaviour and is dropped, never calling
     // telegramApi at all. The throwing noop stub is deliberate: it proves
     // OOB (which WOULD call sendMessage) never fired for /help here.
-    const { deps, statePaths } = makeDeps({ config, server: serverSpy.server })
+    const { deps, statePaths } = makeDeps({ config, policy, server: serverSpy.server })
     const ctx = makeCtx({
       text: '/help',
       chatId: -1009999,
@@ -482,18 +625,35 @@ describe('handleInboundText — /model reachable from inside a topic (2026-07-30
     rmSync(statePaths.root, { recursive: true, force: true })
   })
 
-  test('/model from a sender NOT in allowed_user_ids inside a topic is rejected, falls through', async () => {
-    const config = makeConfig({
-      allowed_user_ids: [164795011],
-      allowed_chat_ids: [-1009999],
-    })
+  test('/model from a sender NOT in policy.allowlist.users inside a topic is rejected, falls through', async () => {
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    const policy = makePolicy(TOPIC_CHAT_ID, [OWNER])
     const serverSpy = makeServerSpy()
-    const { deps, statePaths } = makeDeps({ config, server: serverSpy.server })
+    const { deps, statePaths } = makeDeps({ config, policy, server: serverSpy.server })
     const ctx = makeCtx({
       text: '/model',
       chatId: -1009999,
       chatType: 'supergroup',
-      fromId: 999999999, // not in allowed_user_ids
+      fromId: 999999999, // not in policy.allowlist.users
+      messageThreadId: 555,
+    })
+
+    await expect(handleInboundText(ctx, deps)).resolves.toBeUndefined()
+    expect(serverSpy.calls.length).toBe(0)
+    rmSync(statePaths.root, { recursive: true, force: true })
+  })
+
+  test('/model inside a topic whose chat is NOT in policy.allowlist.chats is rejected, falls through', async () => {
+    const config = makeConfig({ allowed_user_ids: [1], allowed_chat_ids: [1] })
+    // Policy declares a completely different chat — this one isn't listed.
+    const policy = makePolicy('-1002222', [OWNER])
+    const serverSpy = makeServerSpy()
+    const { deps, statePaths } = makeDeps({ config, policy, server: serverSpy.server })
+    const ctx = makeCtx({
+      text: '/model',
+      chatId: -1009999,
+      chatType: 'supergroup',
+      fromId: 164795011,
       messageThreadId: 555,
     })
 
@@ -552,7 +712,10 @@ describe('handleInboundText — InboundWatcher (PR-A3)', () => {
     rmSync(statePaths.root, { recursive: true, force: true })
   })
 
-  test('OOB command (/help) bypasses watcher — no auto-reply even when busy', async () => {
+  test('OOB command (/status) bypasses watcher — no auto-reply even when busy', async () => {
+    // (/help itself is no longer an OOB command as of 2026-08-21 — see the
+    // Fix 6 describe block above; /status still is, and exercises the same
+    // "OOB short-circuits before maybeTriggerWatcher" path this test covers.)
     const sendCalls: Array<{ chatId: string; text: string }> = []
     const tg = makeTelegramApi()
     const api: TelegramApi = {
@@ -575,7 +738,7 @@ describe('handleInboundText — InboundWatcher (PR-A3)', () => {
       watcher,
     })
     const ctx = makeCtx({
-      text: '/help',
+      text: '/status',
       chatId: 164795011,
       chatType: 'private',
       fromId: 164795011,
@@ -584,9 +747,9 @@ describe('handleInboundText — InboundWatcher (PR-A3)', () => {
     await handleInboundText(ctx, deps)
     await new Promise((r) => setTimeout(r, 0))
 
-    // /help replies via sendMessage but the auto-reply «🔧 Бот занят» must
+    // /status replies via sendMessage but the auto-reply «🔧 Бот занят» must
     // NOT appear — OOB short-circuits before the watcher hook. The single
-    // sendMessage we see is the /help body itself.
+    // sendMessage we see is the /status body itself.
     expect(sendCalls.length).toBe(1)
     expect(sendCalls[0]!.text).not.toContain('Бот занят')
     // OOB handled inline — no channel notify.

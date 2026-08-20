@@ -1162,16 +1162,33 @@ export async function handleInboundText(ctx: Context, deps: HandlerDeps): Promis
     const senderNum = ctx.from?.id
     const topicThreadId = ctx.message?.message_thread_id
     const isTopicModelCommand = topicThreadId !== undefined && parsed.name === 'model'
-    const allowedSender =
-      senderNum !== undefined
-      && deps.config.allowed_user_ids.includes(senderNum)
+    // FIX (2026-08-21, found live): the topic case was checking
+    // config.allowed_user_ids/allowed_chat_ids -- the DM-ONLY allowlist
+    // (TELEGRAM_ALLOWED_USER_IDS/_CHAT_IDS, install.sh only ever populates
+    // it with the owner's own id). A supergroup chat id can never be in
+    // allowed_chat_ids, so this gate was unconditionally false for every
+    // topic message -- /model inside a topic always fell through to
+    // gateAndNotify and got forwarded as plain text to that topic's own
+    // Claude session instead of being intercepted, despite the comment
+    // above claiming this path existed. The topic case must authorize
+    // against policy.allowlist (the SAME allowlist that governs whether
+    // this sender/chat may reach a topic session at all), not the DM
+    // allowlist -- checking the topic's BASE chat id (strip `_t\d+$`,
+    // same pattern as policy-loader.ts's chatPolicyEntry / webhook/
+    // server.ts's permission/request handler) since policy.yaml only
+    // ever declares one entry per supergroup, not one per topic.
+    const allowedSender = isTopicModelCommand
+      ? senderId !== undefined && (deps.policy?.allowlist.users.includes(senderId) ?? false)
+      : senderNum !== undefined && deps.config.allowed_user_ids.includes(senderNum)
     // Defence-in-depth: even DM from allowed user must come from a chat in
     // allowed_chat_ids. The allowlists can drift (chat list tighter than user
     // list); without this check an OOB command could run from an unverified
     // chat slot. Coerce config ids to string for comparison since the gate
     // does the same elsewhere.
     const allowedChatSet = new Set(deps.config.allowed_chat_ids.map((v) => String(v)))
-    const allowedChat = chatNum !== undefined && allowedChatSet.has(String(chatNum))
+    const allowedChat = isTopicModelCommand
+      ? chatNum !== undefined && (deps.policy?.allowlist.chats.includes(String(chatNum)) ?? false)
+      : chatNum !== undefined && allowedChatSet.has(String(chatNum))
     const chatId =
       chatNum !== undefined
         ? (topicThreadId !== undefined ? `${String(chatNum)}_t${String(topicThreadId)}` : String(chatNum))
