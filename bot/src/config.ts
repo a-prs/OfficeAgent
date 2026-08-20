@@ -170,7 +170,11 @@ export const AppConfigSchema = z.object({
   // The watcher NEVER replaces the channel notification — it auto-replies
   // AND lets the original message flow to Claude through the normal path.
   watcher: z.object({
-    enabled: z.boolean().default(true),
+    // Default OFF (2026-08-20, owner: the auto-reply is pure noise -- the
+    // actual message is delivered to the session regardless of busy state
+    // via gateAndNotify below; this only ever added an extra "Бот занят"
+    // bubble on top of a message that was never actually going to be lost).
+    enabled: z.boolean().default(false),
     debounce_ms: z.number().int().nonnegative().default(10_000),
     busy_threshold_ms: z.number().int().positive().default(30_000),
   }).default({}),
