@@ -37,6 +37,7 @@ import type { Logger } from '../log.js'
 import {
   assertValidChatId,
   getChatPolicyOrDeny,
+  shouldStreamForChat,
   type MultichatPolicy,
 } from '../chats/policy-loader.js'
 import {
@@ -748,11 +749,24 @@ export class MultichatRouter {
     //    reply-to-mention is meaningless. A message only reaches dispatch
     //    for a public chat if it was addressed (mention / reply-to-bot per
     //    handlers' gate), so threading the reply to it == reply-on-mention.
+    //
+    //    2026-08-21: skip the plain pulse when this chat has streaming:
+    //    'progress' -- topic sessions now report activity via post-hook.ts
+    //    -> /hooks/agent -> statusManager.recordActivityByChatId (same path
+    //    the master DM already used), which ALREADY drives its own native
+    //    sendChatAction pulse internally (see chatActionTick in
+    //    status-manager.ts) as part of the rich status card's lifecycle.
+    //    Running both here would just double-send the same typing action on
+    //    separate timers for no benefit. Chats without streaming enabled
+    //    (streaming: 'off', or not policy-listed) keep exactly today's
+    //    plain-pulse-only behaviour, unchanged.
     if (chatPolicy.mode === 'public') {
       if (input.message_id !== undefined) {
         this.pendingReplyTo.set(input.chat_id, input.message_id)
       }
-      this.startTypingLoop(input.chat_id)
+      if (!shouldStreamForChat(this.policy, input.chat_id)) {
+        this.startTypingLoop(input.chat_id)
+      }
     }
 
     this.logger.debug?.('router.dispatch.ok', {

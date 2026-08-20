@@ -345,11 +345,24 @@ function readBody(req: IncomingMessage): Promise<{ tooLarge: boolean; buf: Buffe
   })
 }
 
-function chatIdAllowed(config: AppConfig, chatId: string): boolean {
+// Widened (2026-08-21, owner decision) so /hooks/agent accepts a topic
+// session's own composite chat id ("<base>_t<topicId>"), not just the
+// master DM's exact allowed_chat_ids — needed for topic sessions to report
+// their own status-card activity via post-hook.ts, same as the master
+// session already does. `permissionAllowedChats` is `policy.allowlist.chats`
+// (base ids only, no `_t` suffix) — already computed once in server.ts and
+// reused here, same pattern resolveModelSwitchPane already uses for the
+// model-switch/permission-gate routes.
+function chatIdAllowed(
+  config: AppConfig,
+  chatId: string,
+  permissionAllowedChats?: string[],
+): boolean {
   for (const entry of config.allowed_chat_ids) {
     if (String(entry) === chatId) return true
   }
-  return false
+  const baseChatId = chatId.replace(/_t\d+$/, '')
+  return permissionAllowedChats?.includes(baseChatId) ?? false
 }
 
 // Build a "safe" public view of config for /health. No tokens, no env.
@@ -379,6 +392,7 @@ async function handleRequest(
     statusManager,
     memoryWriter,
     watcher,
+    permissionAllowedChats,
   } = deps
   const method = req.method ?? 'GET'
   const url = req.url ?? '/'
@@ -522,7 +536,7 @@ async function handleRequest(
   }
 
   // chatId allowlist — defence in depth even with a leaked token.
-  if (!chatIdAllowed(config, payload.chatId)) {
+  if (!chatIdAllowed(config, payload.chatId, permissionAllowedChats)) {
     log.warn('webhook chatId not in allowlist', { chat_id: payload.chatId })
     reply(res, 403, { error: 'chatId not in allowlist' })
     return

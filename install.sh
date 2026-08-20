@@ -449,6 +449,35 @@ cat > "$WORKSPACES_ROOT/chats/.claude/settings.json" <<EOF
 }
 EOF
 
+# Status-card reporting for topics (2026-08-21, owner decision): reuse the
+# SAME patch-claude-settings.ts machinery the master session's install-hooks.sh
+# call below already uses, rather than hand-writing JSON (a hand-rolled
+# heredoc here previously produced invalid JSON -- the CHAT_ID fallback
+# expression needs its embedded double-quotes JSON-escaped, exactly what
+# patch-claude-settings.ts already does correctly). This registers
+# officeagent-channel-hook -> post-hook.ts -> /hooks/agent on all 5 events,
+# additively (it preserves the pre-tool-use.sh/session-start.sh/
+# stop-to-outbox.py entries just written above -- see patch-claude-settings.ts's
+# own "preserve unrelated keys and existing hook entries" invariant), so the
+# rich "working -- Ns / reasoning..." status card (status-manager.ts) renders
+# for group/topic chats too, not just the DM. `${CHAT_ID}` is always set
+# per-topic by multichat-entrypoint.sh, so this reports under each topic's own
+# composite chat id automatically. post-hook.ts needs TELEGRAM_WEBHOOK_TOKEN +
+# TELEGRAM_WEBHOOK_URL; both are already re-exported into every topic tmux
+# child's env by tmux-session-pool.ts's buildSanitizedTmuxEnv (added earlier
+# for the permission-gate hook's own needs) -- explicit owner call to reuse
+# that same credential here rather than mint a narrower one (single-owner-
+# per-install threat model: a compromised topic session is no worse than a
+# compromised master session either way). This also means topic Stop events
+# now flow through the same memory-writer path (config.memory.enabled) the
+# master session already uses -- topics get persistent gbrain memory too, not
+# just status, as a side effect of sharing this endpoint.
+bash "$INSTALL_ROOT/bot/scripts/install-hooks.sh" \
+  --settings "$WORKSPACES_ROOT/chats/.claude/settings.json" \
+  --chat-id "$OWNER_TELEGRAM_USER_ID" \
+  --webhook-url "http://127.0.0.1:8093/hooks/agent" \
+  --agent-id officeagent-channel
+
 # Same trust-dialog seeding as Step 3 (see there for the full "why"), for
 # the SECOND project path claude ever launches in: multichat-entrypoint.sh
 # runs with cwd=$WORKSPACES_ROOT/chats (C4, tmux-session-pool.ts), a
