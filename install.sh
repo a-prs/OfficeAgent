@@ -187,6 +187,18 @@ if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
   ALT_PROVIDER_LABEL="GLM 5.2 (Z.ai)"
 fi
 
+# README promises "the installer won't let you set up the system with no
+# model at all" -- until now nothing actually enforced that. Found live
+# (2026-08-20): every credential prompt above can be answered blank (e.g.
+# `claude setup-token` failing/being skipped with no browser handy), and
+# the installer would sail through the remaining 3 steps, finish "clean",
+# and leave a bot that starts, polls Telegram, and silently can't process
+# a single message ("Not logged in") -- no error anywhere an operator
+# would think to look.
+if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ALT_PROVIDER_TOKEN" ]; then
+  die "no Claude credential configured (ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / GLM token were all left empty) -- re-run install.sh once you have at least one; nothing was left running"
+fi
+
 DEFAULT_MODEL_TARGET=""
 if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -n "$ALT_PROVIDER_TOKEN" ]; then
   DEFAULT_MODEL_TARGET="alt"
