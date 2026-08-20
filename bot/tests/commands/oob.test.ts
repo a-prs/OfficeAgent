@@ -478,3 +478,34 @@ describe('/model', () => {
     })
   })
 })
+
+describe('/tutorial', () => {
+  test('parses as a known command', () => {
+    const parsed = parseOobCommand('/tutorial')
+    expect(parsed).not.toBeNull()
+    expect(parsed!.name).toBe('tutorial')
+  })
+
+  test('returns the menu: HTML reply with one button per content section, no channel notify', async () => {
+    const parsed = parseOobCommand('/tutorial')!
+    const result = await handleOobCommand(parsed, makeCtx())
+    expect(result.handled).toBe(true)
+    expect(result.command).toBe('tutorial')
+    expect(result.notifyChannel).toBeUndefined()
+    expect(result.replyToTelegram!.parseMode).toBe('HTML')
+    const markup = result.replyToTelegram!.replyMarkup
+    expect(markup).toBeDefined()
+    expect(markup!.inline_keyboard.length).toBeGreaterThan(0)
+    // Every row is a single button, every callback_data is tutorial:<key>.
+    for (const row of markup!.inline_keyboard) {
+      expect(row.length).toBe(1)
+      expect(row[0]!.callback_data).toMatch(/^tutorial:[A-Za-z0-9_]+$/)
+    }
+  })
+
+  test('/help lists /tutorial too', async () => {
+    const parsed = parseOobCommand('/help')!
+    const result = await handleOobCommand(parsed, makeCtx())
+    expect(result.replyToTelegram!.text).toContain('/tutorial')
+  })
+})

@@ -15,6 +15,7 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Bot } from 'grammy'
+import type { InlineKeyboardMarkup } from '@grammyjs/types'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { execSync, execFileSync } from 'child_process'
 import { homedir } from 'os'
@@ -68,6 +69,7 @@ import { createPermissionGateUi } from './telegram/permission-gate-ui.js'
 import { TelegramPoller, tokenLock } from './telegram/poller.js'
 import { describePidHolder, readLockHolder } from './telegram/pid-inspect.js'
 import { BOT_COMMANDS } from './commands/oob.js'
+import { CALLBACK_PREFIX as TUTORIAL_PREFIX, MENU_KEY as TUTORIAL_MENU_KEY, buildMenuView as buildTutorialMenu, buildSectionView as buildTutorialSection } from './commands/tutorial.js'
 import { startWebhookServer, type WebhookServerHandle } from './webhook/server.js'
 import {
   handleInboundAudio,
@@ -802,6 +804,39 @@ bot.on('callback_query:data', async ctx => {
       }
     } catch (err) {
       log.error('model callback_query handler threw', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+      try { await ctx.answerCallbackQuery() } catch { /* best effort */ }
+    }
+    return
+  }
+  // /tutorial (2026-08-20) — menu <-> section navigation. Same owner-only
+  // check as model:/kp: (this is read-only content, not a privileged
+  // action, but there's no reason to answer a stranger's tap either).
+  // Unlike model:, this always EDITS the tapped message in place rather
+  // than sending a new one — a menu you can page through, not a message
+  // trail.
+  if (data.startsWith(TUTORIAL_PREFIX)) {
+    try {
+      const allowed = (config.allowed_user_ids ?? []).includes(ctx.from.id)
+      if (!allowed) {
+        await ctx.answerCallbackQuery({ text: 'не авторизовано' })
+        return
+      }
+      const key = data.slice(TUTORIAL_PREFIX.length)
+      const view = key === TUTORIAL_MENU_KEY ? buildTutorialMenu() : buildTutorialSection(key)
+      if (!view) {
+        // Stale button from an edited/older tutorial.yaml — fall back to
+        // the menu rather than leaving a dead tap.
+        const menu = buildTutorialMenu()
+        await ctx.answerCallbackQuery()
+        await ctx.editMessageText(menu.text, { parse_mode: 'HTML', reply_markup: menu.replyMarkup as InlineKeyboardMarkup })
+        return
+      }
+      await ctx.answerCallbackQuery()
+      await ctx.editMessageText(view.text, { parse_mode: 'HTML', reply_markup: view.replyMarkup as InlineKeyboardMarkup })
+    } catch (err) {
+      log.error('tutorial callback_query handler threw', {
         error: err instanceof Error ? err.message : String(err),
       })
       try { await ctx.answerCallbackQuery() } catch { /* best effort */ }

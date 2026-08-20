@@ -34,6 +34,7 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { resolveTopicSessionId, type ModelTarget, type TopicSwitchOverride } from '../channel/model-switch.js'
 import { setModelState } from '../channel/model-state.js'
 import { isTopicChatId } from '../router/topic-lifecycle.js'
+import { buildMenuView } from './tutorial.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -49,7 +50,7 @@ async function topicPaneIsAlive(paneTarget: string): Promise<boolean> {
   }
 }
 
-export type OobCommandName = 'help' | 'status' | 'stop' | 'reset' | 'new' | 'model'
+export type OobCommandName = 'help' | 'status' | 'stop' | 'reset' | 'new' | 'model' | 'tutorial'
 
 const KNOWN_COMMANDS = new Set<OobCommandName>([
   'help',
@@ -58,6 +59,7 @@ const KNOWN_COMMANDS = new Set<OobCommandName>([
   'reset',
   'new',
   'model',
+  'tutorial',
 ])
 
 export interface ParsedOobCommand {
@@ -182,7 +184,8 @@ function helpText(): string {
     + '<code>/stop</code> — попросить Claude остановить текущую задачу\n'
     + '<code>/reset force</code> — сбросить состояние сессии (подтверди флагом <code>force</code>)\n'
     + '<code>/new force</code> — начать новую сессию (подтверди флагом <code>force</code>)\n'
-    + '<code>/model alt|primary</code> — переключить модель сессии (контекст сохраняется через --continue)\n\n'
+    + '<code>/model alt|primary</code> — переключить модель сессии (контекст сохраняется через --continue)\n'
+    + '<code>/tutorial</code> — обзор возможностей бота (кнопки)\n\n'
     + '<i>примечание: /stop — best-effort: плагин передаёт сигнал остановки через '
     + 'канал, но не может гарантировать прерывание посреди вызова инструмента.</i>'
   )
@@ -201,6 +204,7 @@ export const BOT_COMMANDS: ReadonlyArray<BotCommandSpec> = [
   { command: 'reset', description: 'сбросить сессию (нужен force)' },
   { command: 'new', description: 'начать новую сессию (нужен force)' },
   { command: 'model', description: 'переключить модель сессии: alt | primary' },
+  { command: 'tutorial', description: 'обзор возможностей бота' },
 ]
 
 function statusText(ctx: OobContext): string {
@@ -493,6 +497,16 @@ export async function handleOobCommand(
           parseMode: 'HTML',
         },
         pendingModelSwitch: action,
+      }
+    }
+
+    case 'tutorial': {
+      ctx.log.info('oob /tutorial', { chat_id: ctx.chatId })
+      const menu = buildMenuView()
+      return {
+        handled: true,
+        command: 'tutorial',
+        replyToTelegram: { text: menu.text, parseMode: 'HTML', replyMarkup: menu.replyMarkup },
       }
     }
   }
