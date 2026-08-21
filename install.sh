@@ -165,8 +165,31 @@ existing_bot_env_value() {
   grep -m1 "^${var}=" "$CONFIG_ROOT/bot.env" | cut -d= -f2-
 }
 
-read -rp "Telegram bot token (from @BotFather): " TELEGRAM_BOT_TOKEN
-read -rp "Your Telegram numeric user id (from @userinfobot): " OWNER_TELEGRAM_USER_ID
+EXISTING_TELEGRAM_BOT_TOKEN="$(existing_bot_env_value TELEGRAM_BOT_TOKEN)"
+if [ -n "$EXISTING_TELEGRAM_BOT_TOKEN" ]; then
+  read -rp "Telegram bot token is already set from a previous run. Press Enter to keep it, or paste a new one to replace it: " TELEGRAM_BOT_TOKEN
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-$EXISTING_TELEGRAM_BOT_TOKEN}"
+else
+  read -rp "Telegram bot token (from @BotFather): " TELEGRAM_BOT_TOKEN
+fi
+
+EXISTING_OWNER_TELEGRAM_USER_ID="$(existing_bot_env_value TELEGRAM_ALLOWED_USER_IDS)"
+if [ -n "$EXISTING_OWNER_TELEGRAM_USER_ID" ]; then
+  read -rp "Your Telegram numeric user id is already set from a previous run ($EXISTING_OWNER_TELEGRAM_USER_ID). Press Enter to keep it, or type a new one: " OWNER_TELEGRAM_USER_ID
+  OWNER_TELEGRAM_USER_ID="${OWNER_TELEGRAM_USER_ID:-$EXISTING_OWNER_TELEGRAM_USER_ID}"
+else
+  read -rp "Your Telegram numeric user id (from @userinfobot): " OWNER_TELEGRAM_USER_ID
+fi
+
+# Both are hard requirements -- everything downstream (webhook auth, the
+# owner allowlist, install-hooks.sh's --chat-id) assumes they're set. Left
+# blank with no previous bot.env to fall back to, the installer used to
+# sail on to step 5/7 and fail there with a cryptic
+# "install-hooks.sh: --settings, --chat-id, --webhook-url are required"
+# instead of telling the operator what they actually forgot to type
+# (found live, 2026-08-21).
+[ -n "$TELEGRAM_BOT_TOKEN" ] || die "Telegram bot token is required (paste the token @BotFather gave you)"
+[ -n "$OWNER_TELEGRAM_USER_ID" ] || die "Your Telegram numeric user id is required (get it from @userinfobot)"
 
 EXISTING_ANTHROPIC_API_KEY="$(existing_bot_env_value ANTHROPIC_API_KEY)"
 if [ -n "$EXISTING_ANTHROPIC_API_KEY" ]; then
