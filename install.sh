@@ -146,33 +146,74 @@ chown officeagent:officeagent /home/officeagent/.claude
 # Step 4/7: five questions
 # ---------------------------------------------------------------------
 step "4/7 configuration"
+
+# Read a currently-configured value out of a previous run's bot.env, so a
+# re-run (retrying after a partial failure, or just fixing one credential)
+# can default to "keep what's already there" instead of forcing every
+# credential prompt to be re-answered from scratch. An accidental blank
+# Enter through any of these used to silently WIPE an already-working
+# credential (found live, 2026-08-21: a re-run's OAuth prompt was skipped
+# through empty -- operator answered "N" to "already have a token?", then
+# `claude setup-token` couldn't complete headlessly and the final paste
+# prompt was left blank -- silently blanking CLAUDE_CODE_OAUTH_TOKEN in
+# bot.env even though a working token had been configured in there before;
+# the bot then sat on Claude's own login screen with nobody able to answer
+# it, which looked exactly like "model-switch does nothing").
+existing_bot_env_value() {
+  local var="$1"
+  [ -f "$CONFIG_ROOT/bot.env" ] || return 0
+  grep -m1 "^${var}=" "$CONFIG_ROOT/bot.env" | cut -d= -f2-
+}
+
 read -rp "Telegram bot token (from @BotFather): " TELEGRAM_BOT_TOKEN
 read -rp "Your Telegram numeric user id (from @userinfobot): " OWNER_TELEGRAM_USER_ID
-read -rp "Claude auth -- paste ANTHROPIC_API_KEY, or leave empty to log in with your Claude subscription: " ANTHROPIC_API_KEY
+
+EXISTING_ANTHROPIC_API_KEY="$(existing_bot_env_value ANTHROPIC_API_KEY)"
+if [ -n "$EXISTING_ANTHROPIC_API_KEY" ]; then
+  read -rp "Claude auth -- ANTHROPIC_API_KEY is already set from a previous run. Press Enter to keep it, or paste a new value to replace it: " ANTHROPIC_API_KEY
+  ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$EXISTING_ANTHROPIC_API_KEY}"
+else
+  read -rp "Claude auth -- paste ANTHROPIC_API_KEY, or leave empty to log in with your Claude subscription: " ANTHROPIC_API_KEY
+fi
+
+EXISTING_OAUTH_TOKEN="$(existing_bot_env_value CLAUDE_CODE_OAUTH_TOKEN)"
 CLAUDE_CODE_OAUTH_TOKEN=""
 if [ -z "$ANTHROPIC_API_KEY" ]; then
-  read -rp "  Already have a CLAUDE_CODE_OAUTH_TOKEN? [y/N]: " HAVE_TOKEN
-  if [[ "$HAVE_TOKEN" =~ ^[Yy]$ ]]; then
-    read -rp "  Paste it: " CLAUDE_CODE_OAUTH_TOKEN
+  if [ -n "$EXISTING_OAUTH_TOKEN" ]; then
+    read -rp "  CLAUDE_CODE_OAUTH_TOKEN is already set from a previous run. Press Enter to keep it, or paste a new one to replace it: " CLAUDE_CODE_OAUTH_TOKEN
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-$EXISTING_OAUTH_TOKEN}"
   else
-    # Generate it right here instead of sending the operator off to install
-    # Claude Code on a second machine -- `claude` is already on this box
-    # from step 2 above. `claude setup-token` prints a login link (open on
-    # any device with a browser -- a phone is fine); if the browser can't
-    # redirect back (common over SSH) it shows a short code to paste below.
-    # (owner: "нам нужно авторизовать Claude без запуска клода [где-то ещё]", 2026-08-20)
-    echo
-    echo ">>> Opening Claude subscription login. Open the link below on any device"
-    echo ">>> with a browser, approve access, and paste back any code it asks for."
-    echo
-    claude setup-token || true
-    echo
-    read -rp "  Paste the token 'claude setup-token' printed above: " CLAUDE_CODE_OAUTH_TOKEN
+    read -rp "  Already have a CLAUDE_CODE_OAUTH_TOKEN? [y/N]: " HAVE_TOKEN
+    if [[ "$HAVE_TOKEN" =~ ^[Yy]$ ]]; then
+      read -rp "  Paste it: " CLAUDE_CODE_OAUTH_TOKEN
+    else
+      # Generate it right here instead of sending the operator off to install
+      # Claude Code on a second machine -- `claude` is already on this box
+      # from step 2 above. `claude setup-token` prints a login link (open on
+      # any device with a browser -- a phone is fine); if the browser can't
+      # redirect back (common over SSH) it shows a short code to paste below.
+      # (owner: "нам нужно авторизовать Claude без запуска клода [где-то ещё]", 2026-08-20)
+      echo
+      echo ">>> Opening Claude subscription login. Open the link below on any device"
+      echo ">>> with a browser, approve access, and paste back any code it asks for."
+      echo
+      claude setup-token || true
+      echo
+      read -rp "  Paste the token 'claude setup-token' printed above: " CLAUDE_CODE_OAUTH_TOKEN
+    fi
   fi
 fi
+
 read -rp "Full-text search language [russian/english/simple] (default english): " FTS_LANGUAGE
 FTS_LANGUAGE="${FTS_LANGUAGE:-english}"
-read -rp "Also connect GLM (Z.ai) as an alternative model? [y/N]: " WANT_ALT
+
+EXISTING_ALT_TOKEN="$(existing_bot_env_value ALT_PROVIDER_TOKEN)"
+if [ -n "$EXISTING_ALT_TOKEN" ]; then
+  read -rp "Also connect GLM (Z.ai) as an alternative model? Already connected from a previous run -- keep it? [Y/n]: " WANT_ALT
+  WANT_ALT="${WANT_ALT:-Y}"
+else
+  read -rp "Also connect GLM (Z.ai) as an alternative model? [y/N]: " WANT_ALT
+fi
 ALT_PROVIDER_BASE_URL="" ; ALT_PROVIDER_TOKEN="" ; ALT_PROVIDER_MODEL="" ; ALT_PROVIDER_LABEL=""
 if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
   # Only the token is asked -- base_url/model/label are GLM's own fixed,
@@ -182,7 +223,12 @@ if [[ "$WANT_ALT" =~ ^[Yy]$ ]]; then
   # override ALT_PROVIDER_BASE_URL/MODEL/LABEL by hand afterward in
   # /etc/officeagent/bot.env -- that is a power-user path, not the
   # installer's default flow.
-  read -rp "  GLM (Z.ai) API token: " ALT_PROVIDER_TOKEN
+  if [ -n "$EXISTING_ALT_TOKEN" ]; then
+    read -rp "  GLM (Z.ai) API token (already set -- press Enter to keep it, or paste a new one): " ALT_PROVIDER_TOKEN
+    ALT_PROVIDER_TOKEN="${ALT_PROVIDER_TOKEN:-$EXISTING_ALT_TOKEN}"
+  else
+    read -rp "  GLM (Z.ai) API token: " ALT_PROVIDER_TOKEN
+  fi
   ALT_PROVIDER_BASE_URL="https://api.z.ai/api/anthropic"
   ALT_PROVIDER_MODEL="glm-5.2"
   ALT_PROVIDER_LABEL="GLM 5.2 (Z.ai)"
@@ -194,7 +240,13 @@ fi
 # optional -- bot/src/telegram/media.ts already degrades gracefully with no
 # GROQ_API_KEY set (voice messages just aren't transcribed), so an empty
 # answer here is a real, supported choice, not a trap.
-read -rp "Groq API key for voice-message transcription (optional, leave empty to skip -- console.groq.com): " GROQ_API_KEY
+EXISTING_GROQ_KEY="$(existing_bot_env_value GROQ_API_KEY)"
+if [ -n "$EXISTING_GROQ_KEY" ]; then
+  read -rp "Groq API key for voice-message transcription (already set -- press Enter to keep it, or paste a new key): " GROQ_API_KEY
+  GROQ_API_KEY="${GROQ_API_KEY:-$EXISTING_GROQ_KEY}"
+else
+  read -rp "Groq API key for voice-message transcription (optional, leave empty to skip -- console.groq.com): " GROQ_API_KEY
+fi
 
 # README promises "the installer won't let you set up the system with no
 # model at all" -- until now nothing actually enforced that. Found live
