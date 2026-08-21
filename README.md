@@ -43,7 +43,7 @@ GLM — отдельный API-провайдер именно под такую
 ## Установка — одна команда
 
 ```bash
-git clone https://github.com/a-prs/OfficeAgent.git && cd OfficeAgent && sudo bash install.sh
+(git clone https://github.com/a-prs/OfficeAgent.git || (cd OfficeAgent && git pull)) && cd OfficeAgent && sudo bash install.sh
 ```
 
 Установщик сам поставит зависимости (Node, Python, Docker, tmux), спросит
