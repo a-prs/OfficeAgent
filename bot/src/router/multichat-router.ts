@@ -60,7 +60,7 @@ import {
 } from './topic-lifecycle.js'
 
 // Graceful pre-kill handoff dump tuning. The pool caps the whole hook at
-// BEFORE_KILL_TIMEOUT_MS (600s, tmux-session-pool.ts); we poll for the
+// BEFORE_KILL_TIMEOUT_MS (720s, tmux-session-pool.ts); we poll for the
 // session's ack inside that, then run the pre-kill compact (below) in the
 // time that remains. Widened 2026-08-20: the original 90s/150s budgets
 // raced the outer cap too tightly under real load (slow provider, large
@@ -68,11 +68,14 @@ import {
 // killed before /compact (or even the handoff.md rewrite) actually
 // finished. Doubled both, with the outer cap doubled too so the sum still
 // leaves headroom for inbox round-trip overhead.
+// Widened again 2026-08-22 (Андрей): 300s still wasn't enough for /compact
+// on a genuinely large transcript in real use — bumped to 420s (7 min),
+// with the outer cap raised to keep the same ~120s margin over the new sum.
 const GRACEFUL_DUMP_POLL_MS = 180_000
 const GRACEFUL_DUMP_POLL_INTERVAL_MS = 1_500
 // Compacting a large transcript is effectively a full-context LLM call —
 // give it a generous, separate budget from the handoff-dump poll above.
-const COMPACT_POLL_MS = 300_000
+const COMPACT_POLL_MS = 420_000
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
